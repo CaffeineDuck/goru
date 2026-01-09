@@ -89,7 +89,7 @@ executor.WithKVStore(kv)
 ### Filesystem
 
 ```go
-fs := hostfunc.NewFS(
-    hostfunc.Mount{VirtualPath: "/data", HostPath: "./input", Mode: hostfunc.MountReadOnly},
-)
+fs := hostfunc.NewFS([]hostfunc.Mount{
+    {VirtualPath: "/data", HostPath: "./input", Mode: hostfunc.MountReadOnly},
+})
 ```
