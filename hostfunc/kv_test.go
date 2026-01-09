@@ -100,3 +100,75 @@ func TestKVSetMissingValue(t *testing.T) {
 		t.Errorf("expected 'value required', got %v", err)
 	}
 }
+
+// Security tests
+
+func TestKVKeyTooLarge(t *testing.T) {
+	kv := NewKVStore(WithMaxKeySize(100))
+	ctx := context.Background()
+
+	longKey := string(make([]byte, 200))
+	_, err := kv.Set(ctx, map[string]any{"key": longKey, "value": "test"})
+	if err == nil {
+		t.Error("expected large key to be rejected")
+	}
+	if err.Error() != "key too large" {
+		t.Errorf("expected 'key too large' error, got %v", err)
+	}
+}
+
+func TestKVValueTooLarge(t *testing.T) {
+	kv := NewKVStore(WithMaxValueSize(100))
+	ctx := context.Background()
+
+	largeValue := string(make([]byte, 200))
+	_, err := kv.Set(ctx, map[string]any{"key": "test", "value": largeValue})
+	if err == nil {
+		t.Error("expected large value to be rejected")
+	}
+	if err.Error() != "value too large" {
+		t.Errorf("expected 'value too large' error, got %v", err)
+	}
+}
+
+func TestKVTooManyEntries(t *testing.T) {
+	kv := NewKVStore(WithMaxEntries(3))
+	ctx := context.Background()
+
+	// Add 3 entries (should succeed)
+	for i := 0; i < 3; i++ {
+		_, err := kv.Set(ctx, map[string]any{"key": string(rune('a' + i)), "value": "test"})
+		if err != nil {
+			t.Fatalf("unexpected error on entry %d: %v", i, err)
+		}
+	}
+
+	// 4th entry should fail
+	_, err := kv.Set(ctx, map[string]any{"key": "d", "value": "test"})
+	if err == nil {
+		t.Error("expected too many entries error")
+	}
+	if err.Error() != "too many entries" {
+		t.Errorf("expected 'too many entries' error, got %v", err)
+	}
+
+	// Updating existing entry should still work
+	_, err = kv.Set(ctx, map[string]any{"key": "a", "value": "updated"})
+	if err != nil {
+		t.Errorf("updating existing key should work: %v", err)
+	}
+}
+
+func TestKVGetKeyTooLarge(t *testing.T) {
+	kv := NewKVStore(WithMaxKeySize(100))
+	ctx := context.Background()
+
+	longKey := string(make([]byte, 200))
+	_, err := kv.Get(ctx, map[string]any{"key": longKey})
+	if err == nil {
+		t.Error("expected large key to be rejected in Get")
+	}
+	if err.Error() != "key too large" {
+		t.Errorf("expected 'key too large' error, got %v", err)
+	}
+}
