@@ -16,3 +16,6 @@ def kv_get(key):
 
 def kv_set(key, value):
     return _goru_call("kv_set", {"key": key, "value": value})
+
+def kv_delete(key):
+    return _goru_call("kv_delete", {"key": key})

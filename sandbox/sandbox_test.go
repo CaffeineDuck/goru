@@ -4,10 +4,15 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/caffeineduck/goru/hostfunc"
 )
 
-func TestBasicPrint(t *testing.T) {
-	result := RunPython("print('hello')", DefaultOptions())
+// Integration tests - full Python execution
+// Unit tests for individual components are in their respective packages
+
+func TestPythonBasicExecution(t *testing.T) {
+	result := Run("print('hello')", DefaultConfig())
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
@@ -16,48 +21,35 @@ func TestBasicPrint(t *testing.T) {
 	}
 }
 
-func TestComputation(t *testing.T) {
-	result := RunPython("print(sum(range(10)))", DefaultOptions())
+func TestPythonComputation(t *testing.T) {
+	result := Run("print(sum(x**2 for x in range(10)))", DefaultConfig())
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
-	if strings.TrimSpace(result.Output) != "45" {
-		t.Errorf("expected '45', got %q", result.Output)
+	if strings.TrimSpace(result.Output) != "285" {
+		t.Errorf("expected '285', got %q", result.Output)
 	}
 }
 
-func TestKVStore(t *testing.T) {
-	result := RunPython(`
-kv_set("test_key", "test_value")
-print(kv_get("test_key"))
-`, DefaultOptions())
+func TestPythonHostFunctionCall(t *testing.T) {
+	result := Run(`
+kv_set("key", "value")
+print(kv_get("key"))
+`, DefaultConfig())
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
-	if strings.TrimSpace(result.Output) != "test_value" {
-		t.Errorf("expected 'test_value', got %q", result.Output)
+	if strings.TrimSpace(result.Output) != "value" {
+		t.Errorf("expected 'value', got %q", result.Output)
 	}
 }
 
-func TestHTTPBlockedByDefault(t *testing.T) {
-	result := RunPython(`http_get("https://example.com")`, DefaultOptions())
-	if result.Error == nil {
-		t.Error("expected error for blocked HTTP")
-	}
-	if !strings.Contains(result.Output, "http not enabled") {
-		t.Errorf("expected 'http not enabled' error, got %q", result.Output)
-	}
-}
-
-func TestHTTPAllowedWithHost(t *testing.T) {
-	opts := Options{
+func TestPythonHTTPWithAllowedHost(t *testing.T) {
+	cfg := Config{
 		Timeout:      30 * time.Second,
 		AllowedHosts: []string{"httpbin.org"},
 	}
-	result := RunPython(`
-resp = http_get("https://httpbin.org/get")
-print(resp["status"])
-`, opts)
+	result := Run(`print(http_get("https://httpbin.org/get")["status"])`, cfg)
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
@@ -66,48 +58,12 @@ print(resp["status"])
 	}
 }
 
-func TestHTTPWrongHostBlocked(t *testing.T) {
-	opts := Options{
-		Timeout:      30 * time.Second,
-		AllowedHosts: []string{"httpbin.org"},
-	}
-	result := RunPython(`http_get("https://evil.com")`, opts)
-	if result.Error == nil {
-		t.Error("expected error for wrong host")
-	}
-	if !strings.Contains(result.Output, "host not allowed") {
-		t.Errorf("expected 'host not allowed' error, got %q", result.Output)
-	}
-}
-
-func TestFilesystemBlocked(t *testing.T) {
-	result := RunPython(`open("/etc/passwd")`, DefaultOptions())
-	if result.Error == nil {
-		t.Error("expected error for filesystem access")
-	}
-	if !strings.Contains(result.Output, "No such file") {
-		t.Errorf("expected 'No such file' error, got %q", result.Output)
-	}
-}
-
-func TestOsSystemBlocked(t *testing.T) {
-	result := RunPython(`import os; os.system("ls")`, DefaultOptions())
-	if result.Error == nil {
-		t.Error("expected error for os.system")
-	}
-	if !strings.Contains(result.Output, "no attribute") {
-		t.Errorf("expected 'no attribute' error, got %q", result.Output)
-	}
-}
-
-func TestTimeout(t *testing.T) {
-	opts := Options{Timeout: 2 * time.Second}
-	result := RunPython(`
-i = 0
+func TestPythonTimeout(t *testing.T) {
+	cfg := Config{Timeout: 2 * time.Second}
+	result := Run(`
 while True:
-    print(i)
-    i += 1
-`, opts)
+    print(".", end="", flush=True)
+`, cfg)
 	if result.Error == nil {
 		t.Error("expected timeout error")
 	}
@@ -116,8 +72,34 @@ while True:
 	}
 }
 
-func TestDurationTracked(t *testing.T) {
-	result := RunPython("print(1)", DefaultOptions())
+func TestPythonKVIsolationAcrossRuns(t *testing.T) {
+	kv := hostfunc.NewKVStore()
+	cfg := Config{Timeout: 30 * time.Second, KVStore: kv}
+
+	Run(`kv_set("persistent", "across-runs")`, cfg)
+	result := Run(`print(kv_get("persistent"))`, cfg)
+
+	if strings.TrimSpace(result.Output) != "across-runs" {
+		t.Errorf("expected 'across-runs', got %q", result.Output)
+	}
+}
+
+func TestPythonMultipleHostCalls(t *testing.T) {
+	result := Run(`
+for i in range(3):
+    kv_set(f"k{i}", f"v{i}")
+print(",".join(kv_get(f"k{i}") for i in range(3)))
+`, DefaultConfig())
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "v0,v1,v2" {
+		t.Errorf("expected 'v0,v1,v2', got %q", result.Output)
+	}
+}
+
+func TestPythonDurationTracked(t *testing.T) {
+	result := Run("print(1)", DefaultConfig())
 	if result.Duration <= 0 {
 		t.Error("expected positive duration")
 	}
