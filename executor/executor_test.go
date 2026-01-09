@@ -253,6 +253,83 @@ print(",".join(names))
 }
 
 // =============================================================================
+// ASYNC TESTS
+// =============================================================================
+
+func TestPythonAsyncKV(t *testing.T) {
+	result := sharedExec.Run(context.Background(), sharedLang, `
+import asyncio
+
+async def main():
+    await async_kv_set("async_a", "value_a")
+    await async_kv_set("async_b", "value_b")
+    results = await asyncio.gather(
+        async_kv_get("async_a"),
+        async_kv_get("async_b")
+    )
+    return results
+
+result = run_async(main())
+print(",".join(result))
+`)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "value_a,value_b" {
+		t.Errorf("expected 'value_a,value_b', got %q", result.Output)
+	}
+}
+
+func TestPythonAsyncBatching(t *testing.T) {
+	// Test that multiple async calls are batched together
+	result := sharedExec.Run(context.Background(), sharedLang, `
+import asyncio
+
+# Set up data
+for i in range(5):
+    kv_set(f"batch_{i}", str(i * 10))
+
+async def main():
+    # These should be batched into a single FLUSH
+    results = await asyncio.gather(
+        async_kv_get("batch_0"),
+        async_kv_get("batch_1"),
+        async_kv_get("batch_2"),
+        async_kv_get("batch_3"),
+        async_kv_get("batch_4")
+    )
+    return results
+
+result = run_async(main())
+print(",".join(result))
+`)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "0,10,20,30,40" {
+		t.Errorf("expected '0,10,20,30,40', got %q", result.Output)
+	}
+}
+
+func TestPythonTimeNow(t *testing.T) {
+	result := sharedExec.Run(context.Background(), sharedLang, `
+import time
+now = time.time()
+# Should be after 2020 and before 2100
+if now > 1577836800 and now < 4102444800:
+    print("OK")
+else:
+    print(f"FAIL: {now}")
+`)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "OK" {
+		t.Errorf("expected 'OK', got %q", result.Output)
+	}
+}
+
+// =============================================================================
 // MEMORY LIMIT TEST
 // =============================================================================
 

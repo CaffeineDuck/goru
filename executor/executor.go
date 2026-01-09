@@ -110,6 +110,11 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		registry = hostfunc.NewRegistry()
 	}
 
+	// Add time function (always available)
+	registry.Register("time_now", func(ctx context.Context, args map[string]any) (any, error) {
+		return float64(time.Now().UnixNano()) / 1e9, nil
+	})
+
 	// Add KV store (per-run or shared)
 	kv := cfg.kvStore
 	if kv == nil {
