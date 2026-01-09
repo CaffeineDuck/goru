@@ -1,13 +1,17 @@
 package main
 
 import (
+	"context"
 	"flag"
 	"fmt"
 	"io"
 	"os"
 	"strings"
+	"time"
 
-	"github.com/caffeineduck/goru/sandbox"
+	"github.com/caffeineduck/goru/executor"
+	"github.com/caffeineduck/goru/hostfunc"
+	"github.com/caffeineduck/goru/language/python"
 )
 
 type stringSlice []string
@@ -21,7 +25,8 @@ func (s *stringSlice) Set(v string) error {
 func main() {
 	var (
 		code        = flag.String("c", "", "Python code to execute")
-		timeout     = flag.Duration("timeout", sandbox.DefaultOptions().Timeout, "Execution timeout")
+		timeout     = flag.Duration("timeout", 30*time.Second, "Execution timeout")
+		noCache     = flag.Bool("no-cache", false, "Disable disk compilation cache")
 		allowedHost stringSlice
 	)
 	flag.Var(&allowedHost, "allow-host", "Allowed HTTP host (can be repeated)")
@@ -53,12 +58,30 @@ func main() {
 		os.Exit(1)
 	}
 
-	opts := sandbox.Options{
-		Timeout:      *timeout,
-		AllowedHosts: allowedHost,
+	// Set up host function registry
+	registry := hostfunc.NewRegistry()
+
+	// Create executor with disk cache for faster repeated CLI calls
+	var execOpts []executor.ExecutorOption
+	if !*noCache {
+		execOpts = append(execOpts, executor.WithDiskCache())
 	}
 
-	result := sandbox.RunPython(source, opts)
+	exec, err := executor.New(registry, execOpts...)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error creating executor: %v\n", err)
+		os.Exit(1)
+	}
+	defer exec.Close()
+
+	// Run Python code
+	var runOpts []executor.Option
+	runOpts = append(runOpts, executor.WithTimeout(*timeout))
+	if len(allowedHost) > 0 {
+		runOpts = append(runOpts, executor.WithAllowedHosts(allowedHost))
+	}
+
+	result := exec.Run(context.Background(), python.New(), source, runOpts...)
 
 	fmt.Print(result.Output)
 
