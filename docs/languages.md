@@ -21,7 +21,7 @@
 | Types | typing, dataclasses, enum, abc |
 | Parsing | ast, tokenize, argparse, configparser |
 | Database | sqlite3 (in-memory only) |
-| Async | asyncio (single-threaded) |
+| Async | asyncio (with custom WASI event loop) |
 | Testing | unittest, doctest |
 
 ### Blocked (WASI limitations)
@@ -33,49 +33,55 @@
 | `ssl` | Not compiled in |
 | `socket` (raw) | No network stack |
 | `subprocess` | No process spawning |
-| `os.listdir`, `open()` | No filesystem (use mounts) |
+| `os.listdir`, `open()` | No filesystem (use `fs` module) |
+
+### Built-in Modules
+
+```python
+# Key-value store
+kv.set("key", "value")
+kv.get("key", default="fallback")
+kv.delete("key")
+
+# HTTP client (requires WithAllowedHosts)
+resp = http.get(url)
+resp.ok, resp.status_code, resp.text, resp.json()
+
+# Filesystem (requires WithMount)
+fs.read_text(path)
+fs.read_json(path)
+fs.write_text(path, content)
+fs.write_json(path, data, indent=2)
+fs.listdir(path)
+fs.exists(path)
+fs.stat(path)
+fs.mkdir(path)
+fs.remove(path)
+
+# Time (monkey-patched)
+import time
+time.time()  # Real host time
+
+# Async support
+import asyncio
+async def main():
+    results = await asyncio.gather(
+        kv.async_get("a"),
+        kv.async_get("b"),
+    )
+run_async(main())
+```
 
 ### Type Stubs
 
-`language/python/goru.pyi`:
-
-```python
-from typing import TypedDict
-
-class HTTPResponse(TypedDict):
-    status: int
-    body: str
-
-class FSEntry(TypedDict):
-    name: str
-    is_dir: bool
-    size: int
-
-class FSStatResult(TypedDict):
-    name: str
-    size: int
-    is_dir: bool
-    mod_time: int
-
-def kv_get(key: str) -> str | None: ...
-def kv_set(key: str, value: str) -> str: ...
-def kv_delete(key: str) -> str: ...
-def http_get(url: str) -> HTTPResponse: ...
-def fs_read(path: str) -> str: ...
-def fs_write(path: str, content: str) -> str: ...
-def fs_list(path: str) -> list[FSEntry]: ...
-def fs_exists(path: str) -> bool: ...
-def fs_mkdir(path: str) -> str: ...
-def fs_remove(path: str) -> str: ...
-def fs_stat(path: str) -> FSStatResult: ...
-```
+`language/python/goru.pyi` - see file for full API.
 
 ---
 
 ## JavaScript
 
 **Runtime:** QuickJS-NG compiled to WASI
-**Source:** [paralin/go-quickjs-wasi](https://github.com/paralin/go-quickjs-wasi)
+**Source:** [nicholasareed/nicholasareed.github.io](https://github.com/nicholasareed/nicholasareed.github.io)
 **Size:** ~1.5MB
 **Performance:** ~200ms cold, ~60ms warm
 
@@ -89,46 +95,47 @@ def fs_stat(path: str) -> FSStatResult: ...
 
 | Feature | Reason |
 |---------|--------|
-| `fetch` | No network (use `http_get`) |
+| `fetch` | No network (use `http.get`) |
 | `require`/`import` | No module loading |
 | `setTimeout` | No event loop |
-| File I/O | No filesystem (use mounts) |
+| File I/O | No filesystem (use `fs` module) |
+
+### Built-in Modules
+
+```javascript
+// Key-value store
+kv.set("key", "value");
+kv.get("key", "fallback");
+kv.delete("key");
+
+// HTTP client (requires WithAllowedHosts)
+const resp = http.get(url);
+resp.ok, resp.statusCode, resp.text, resp.json()
+
+// Filesystem (requires WithMount)
+fs.readText(path);
+fs.readJson(path);
+fs.writeText(path, content);
+fs.writeJson(path, data, 2);
+fs.listdir(path);
+fs.exists(path);
+fs.stat(path);
+fs.mkdir(path);
+fs.remove(path);
+
+// Time
+time_now()  // Unix timestamp
+
+// Async support
+const results = await runAsync(
+    kv.asyncGet("a"),
+    kv.asyncGet("b"),
+);
+```
 
 ### Type Definitions
 
-`language/javascript/goru.d.ts`:
-
-```typescript
-interface HTTPResponse {
-  status: number;
-  body: string;
-}
-
-interface FSEntry {
-  name: string;
-  is_dir: boolean;
-  size: number;
-}
-
-interface FSStatResult {
-  name: string;
-  size: number;
-  is_dir: boolean;
-  mod_time: number;
-}
-
-declare function kv_get(key: string): string | null;
-declare function kv_set(key: string, value: string): string;
-declare function kv_delete(key: string): string;
-declare function http_get(url: string): HTTPResponse;
-declare function fs_read(path: string): string;
-declare function fs_write(path: string, content: string): string;
-declare function fs_list(path: string): FSEntry[];
-declare function fs_exists(path: string): boolean;
-declare function fs_mkdir(path: string): string;
-declare function fs_remove(path: string): string;
-declare function fs_stat(path: string): FSStatResult;
-```
+`language/javascript/goru.d.ts` - see file for full API.
 
 ---
 

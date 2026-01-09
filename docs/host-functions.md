@@ -2,27 +2,39 @@
 
 Host functions let sandboxed code call back into Go. They're the only way sandboxed code can interact with the outside world.
 
-## Built-in Functions
+## Built-in Modules
 
-### KV Store
+### kv - Key-Value Store
 
 Always available. In-memory key-value storage.
 
 **Python:**
 ```python
-kv_set("key", "value")  # returns "ok"
-kv_get("key")           # returns "value" or None
-kv_delete("key")        # returns "ok"
+kv.set("key", "value")
+kv.get("key")                    # returns "value" or None
+kv.get("key", default="fallback")  # returns "fallback" if not found
+kv.delete("key")
+
+# Async
+await kv.async_set("key", "value")
+await kv.async_get("key")
+await kv.async_delete("key")
 ```
 
 **JavaScript:**
 ```javascript
-kv_set("key", "value")  // returns "ok"
-kv_get("key")           // returns "value" or null
-kv_delete("key")        // returns "ok"
+kv.set("key", "value");
+kv.get("key");              // returns "value" or null
+kv.get("key", "fallback");  // returns "fallback" if not found
+kv.delete("key");
+
+// Async
+await kv.asyncSet("key", "value");
+await kv.asyncGet("key");
+await kv.asyncDelete("key");
 ```
 
-### HTTP
+### http - HTTP Client
 
 Requires `WithAllowedHosts`. GET requests only.
 
@@ -33,21 +45,31 @@ exec.Run(ctx, lang, code, executor.WithAllowedHosts([]string{"api.example.com"})
 
 **Python:**
 ```python
-resp = http_get("https://api.example.com/data")
-print(resp["status"])  # 200
-print(resp["body"])    # response body string
+resp = http.get("https://api.example.com/data")
+resp.ok           # True if 2xx
+resp.status_code  # 200
+resp.text         # response body string
+resp.json()       # parse JSON
+
+# Async
+resp = await http.async_get("https://api.example.com/data")
 ```
 
 **JavaScript:**
 ```javascript
-const resp = http_get("https://api.example.com/data");
-console.log(resp.status);  // 200
-console.log(resp.body);    // response body string
+const resp = http.get("https://api.example.com/data");
+resp.ok          // true if 2xx
+resp.statusCode  // 200
+resp.text        // response body string
+resp.json()      // parse JSON
+
+// Async
+const resp = await http.asyncGet("https://api.example.com/data");
 ```
 
 Host matching: exact match or subdomain (e.g., `api.example.com` allows `sub.api.example.com`).
 
-### Filesystem
+### fs - Filesystem
 
 Requires `WithMount`. Virtual paths mapped to host paths with explicit permissions.
 
@@ -59,27 +81,107 @@ exec.Run(ctx, lang, code,
 )
 ```
 
-| Function | Description | Min Mode |
-|----------|-------------|----------|
-| `fs_read(path)` | Read file contents | ro |
-| `fs_write(path, content)` | Write to file | rw |
-| `fs_list(path)` | List directory | ro |
-| `fs_exists(path)` | Check if path exists | ro |
-| `fs_stat(path)` | Get file info | ro |
-| `fs_mkdir(path)` | Create directory | rwc |
-| `fs_remove(path)` | Delete file/empty dir | rw |
+**Python:**
+```python
+fs.read_text("/data/file.txt")
+fs.read_json("/data/config.json")
+fs.write_text("/out/result.txt", "content")
+fs.write_json("/out/data.json", {"key": "value"}, indent=2)
+fs.listdir("/data")
+fs.exists("/data/file.txt")
+fs.stat("/data/file.txt")
+fs.mkdir("/out/subdir")
+fs.remove("/out/temp.txt")
+
+# Async versions
+await fs.async_read_text("/data/file.txt")
+await fs.async_write_text("/out/result.txt", "content")
+# ... etc
+```
+
+**JavaScript:**
+```javascript
+fs.readText("/data/file.txt");
+fs.readJson("/data/config.json");
+fs.writeText("/out/result.txt", "content");
+fs.writeJson("/out/data.json", {key: "value"}, 2);
+fs.listdir("/data");
+fs.exists("/data/file.txt");
+fs.stat("/data/file.txt");
+fs.mkdir("/out/subdir");
+fs.remove("/out/temp.txt");
+
+// Async versions
+await fs.asyncReadText("/data/file.txt");
+await fs.asyncWriteText("/out/result.txt", "content");
+// ... etc
+```
+
+| Method | Description | Min Mode |
+|--------|-------------|----------|
+| `read_text` / `readText` | Read file contents | ro |
+| `read_json` / `readJson` | Read and parse JSON file | ro |
+| `write_text` / `writeText` | Write string to file | rw |
+| `write_json` / `writeJson` | Write data as JSON | rw |
+| `listdir` | List directory | ro |
+| `exists` | Check if path exists | ro |
+| `stat` | Get file info | ro |
+| `mkdir` | Create directory | rwc |
+| `remove` | Delete file/empty dir | rw |
 
 **Return types:**
 
 ```python
-# fs_list returns:
+# fs.listdir returns:
 [{"name": "file.txt", "is_dir": False, "size": 123}, ...]
 
-# fs_stat returns:
+# fs.stat returns:
 {"name": "file.txt", "size": 123, "is_dir": False, "mod_time": 1704067200}
 ```
 
 Path traversal attacks (`../`) are blocked.
+
+### time
+
+**Python:**
+```python
+import time
+time.time()  # Returns real host time (monkey-patched)
+```
+
+**JavaScript:**
+```javascript
+time_now()  // Returns Unix timestamp
+```
+
+## Async Support
+
+Both Python and JavaScript support true async/await with concurrent host function execution.
+
+**Python:**
+```python
+import asyncio
+
+async def main():
+    # These run concurrently - ~1s total, not ~3s
+    results = await asyncio.gather(
+        http.async_get("https://api1.example.com"),
+        http.async_get("https://api2.example.com"),
+        http.async_get("https://api3.example.com"),
+    )
+    return results
+
+result = run_async(main())
+```
+
+**JavaScript:**
+```javascript
+const results = await runAsync(
+    http.asyncGet("https://api1.example.com"),
+    http.asyncGet("https://api2.example.com"),
+    http.asyncGet("https://api3.example.com"),
+);
+```
 
 ## Custom Functions
 
@@ -90,37 +192,24 @@ registry := hostfunc.NewRegistry()
 
 registry.Register("get_user", func(ctx context.Context, args map[string]any) (any, error) {
     userID := args["id"].(string)
-    // Look up user in database
     return map[string]any{
         "id":   userID,
         "name": "Alice",
-        "email": "alice@example.com",
     }, nil
-})
-
-registry.Register("send_email", func(ctx context.Context, args map[string]any) (any, error) {
-    to := args["to"].(string)
-    subject := args["subject"].(string)
-    body := args["body"].(string)
-    // Send via your email service
-    return "sent", nil
 })
 
 exec, _ := executor.New(registry)
 ```
 
-Call from sandboxed code:
+Call from sandboxed code using the low-level protocol:
 
 **Python:**
 ```python
 user = _goru_call("get_user", {"id": "123"})
 print(user["name"])  # Alice
 
-_goru_call("send_email", {
-    "to": "alice@example.com",
-    "subject": "Hello",
-    "body": "Welcome!"
-})
+# Async
+user = await _async_call("get_user", {"id": "123"})
 ```
 
 **JavaScript:**
@@ -128,11 +217,8 @@ _goru_call("send_email", {
 const user = _goru_call("get_user", {id: "123"});
 console.log(user.name);  // Alice
 
-_goru_call("send_email", {
-    to: "alice@example.com",
-    subject: "Hello",
-    body: "Welcome!"
-});
+// Async
+const user = await _asyncCall("get_user", {id: "123"});
 ```
 
 ## Type Stubs
