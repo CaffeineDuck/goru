@@ -179,11 +179,11 @@ wg.Wait()
 ### Executor Options
 
 ```go
-// Enable disk cache for faster CLI startup
+// Enable disk cache for faster CLI startup (uses ~/.cache/goru)
 exec, _ := executor.New(registry, executor.WithDiskCache())
 
 // Custom cache directory
-exec, _ := executor.New(registry, executor.WithCacheDir("/tmp/my-cache"))
+exec, _ := executor.New(registry, executor.WithDiskCache("/tmp/my-cache"))
 
 // Precompile languages at startup
 exec, _ := executor.New(registry, executor.WithPrecompile(python.New()))

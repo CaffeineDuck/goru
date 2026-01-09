@@ -46,9 +46,9 @@ func WithKVStore(kv *hostfunc.KVStore) Option {
 type ExecutorOption func(*executorConfig)
 
 type executorConfig struct {
-	diskCache    bool
-	cacheDir     string
-	precompile   []Language // Languages to precompile at startup
+	diskCache  bool
+	cacheDir   string
+	precompile []Language // Languages to precompile at startup
 }
 
 func defaultExecutorConfig() executorConfig {
@@ -58,18 +58,18 @@ func defaultExecutorConfig() executorConfig {
 }
 
 // WithDiskCache enables persistent compilation cache for faster CLI startup.
-// Cache is stored in ~/.cache/goru or XDG_CACHE_HOME/goru.
-func WithDiskCache() ExecutorOption {
+// Optionally provide a custom directory; otherwise uses ~/.cache/goru or XDG_CACHE_HOME/goru.
+//
+// Examples:
+//
+//	executor.New(registry, executor.WithDiskCache())            // default dir
+//	executor.New(registry, executor.WithDiskCache("/tmp/cache")) // custom dir
+func WithDiskCache(dir ...string) ExecutorOption {
 	return func(c *executorConfig) {
 		c.diskCache = true
-	}
-}
-
-// WithCacheDir sets a custom directory for the disk cache.
-func WithCacheDir(dir string) ExecutorOption {
-	return func(c *executorConfig) {
-		c.diskCache = true
-		c.cacheDir = dir
+		if len(dir) > 0 && dir[0] != "" {
+			c.cacheDir = dir[0]
+		}
 	}
 }
 

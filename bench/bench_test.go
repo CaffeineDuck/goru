@@ -323,7 +323,7 @@ func TestDiskCacheBenefit(t *testing.T) {
 	for i := 0; i < 5; i++ {
 		start := time.Now()
 
-		exec, _ := executor.New(registry, executor.WithCacheDir(cacheDir))
+		exec, _ := executor.New(registry, executor.WithDiskCache(cacheDir))
 		exec.Run(context.Background(), lang, "print(1)")
 		exec.Close()
 
