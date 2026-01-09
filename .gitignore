@@ -1,0 +1,5 @@
+# Binary
+/goru
+
+# Large WASM files (download via script)
+sandbox/python.wasm
