@@ -111,7 +111,7 @@ async def main():
     )
     return results
 
-result = run_async(main())
+asyncio.run(main())
 ```
 
 **Custom Host Functions**: Expose your own Go functions to sandboxed code:

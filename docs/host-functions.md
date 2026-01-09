@@ -193,7 +193,7 @@ Both Python and JavaScript support true async/await with concurrent host functio
 import asyncio
 
 async def main():
-    # These run concurrently - ~1s total, not ~3s
+    # These run concurrently
     results = await asyncio.gather(
         http.async_get("https://api1.example.com"),
         http.async_get("https://api2.example.com"),
@@ -201,8 +201,10 @@ async def main():
     )
     return results
 
-result = run_async(main())
+asyncio.run(main())
 ```
+
+`asyncio.run` is patched to use goru's WASM-compatible event loop. You can also use `run_async(coro)` directly.
 
 **JavaScript:**
 ```javascript

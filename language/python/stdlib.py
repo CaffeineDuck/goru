@@ -281,3 +281,10 @@ def time_now():
     return _goru_call("time_now", {})
 
 _time_module.time = time_now
+
+# =============================================================================
+# Patches
+# =============================================================================
+
+import asyncio as _asyncio
+_asyncio.run = run_async
