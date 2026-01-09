@@ -26,22 +26,27 @@ Usage:
   goru run [options] [file]      Run code
   goru serve [options]           Start HTTP server
 
-Run Options:
-  -c string         Code to execute
+Common Options:
+  -c string         Code to execute (run only)
   -lang string      Language: python, js (default: auto-detect)
   -timeout dur      Execution timeout (default 30s)
   -allow-host host  Allow HTTP to host (repeatable)
   -mount spec       Mount filesystem (virtual:host:mode, repeatable)
   -no-cache         Disable compilation cache
 
+Security Limits (all commands):
+  -kv-max-key int      Max KV key size in bytes (default 1024)
+  -kv-max-value int    Max KV value size in bytes (default 1048576)
+  -kv-max-entries int  Max KV entries (default 10000)
+  -http-max-url int    Max HTTP URL length (default 8192)
+  -http-max-body int   Max HTTP response body (default 1048576)
+  -fs-max-file int     Max file read size (default 10485760)
+  -fs-max-write int    Max file write size (default 10485760)
+  -fs-max-path int     Max path length (default 4096)
+
 Serve Options:
   -port int         Port to listen on (default 8080)
-  -lang string      Default language: python, js (default: python)
-  -timeout dur      Default execution timeout (default 30s)
   -session-ttl dur  Session expiry time (default 1h)
-  -allow-host host  Allow HTTP to host (repeatable)
-  -mount spec       Mount filesystem (virtual:host:mode, repeatable)
-  -no-cache         Disable compilation cache
 
 Languages:
   python, py   Python 3.12 (CPython WASM, ~1.5s cold / ~120ms warm)
@@ -56,8 +61,8 @@ Examples:
   goru -c 'print(1+1)'
   goru script.py
   goru -lang js -c 'console.log(1+1)'
-  goru script.js
   goru -timeout 5s -c 'while True: pass'
+  goru -kv-max-entries 100 -c 'for i in range(200): kv_set(str(i), "x")'
   goru serve -port 8080 -lang js
 `
 
@@ -153,6 +158,15 @@ func runCmd(args []string) {
 		noCache      = fs.Bool("no-cache", false, "Disable compilation cache")
 		allowedHosts stringSlice
 		mounts       stringSlice
+		// Security limits
+		kvMaxKey     = fs.Int("kv-max-key", 1024, "Max KV key size")
+		kvMaxValue   = fs.Int("kv-max-value", 1024*1024, "Max KV value size")
+		kvMaxEntries = fs.Int("kv-max-entries", 10000, "Max KV entries")
+		httpMaxURL   = fs.Int("http-max-url", 8192, "Max HTTP URL length")
+		httpMaxBody  = fs.Int64("http-max-body", 1024*1024, "Max HTTP response body")
+		fsMaxFile    = fs.Int64("fs-max-file", 10*1024*1024, "Max file read size")
+		fsMaxWrite   = fs.Int64("fs-max-write", 10*1024*1024, "Max file write size")
+		fsMaxPath    = fs.Int("fs-max-path", 4096, "Max path length")
 	)
 	fs.Var(&allowedHosts, "allow-host", "Allowed HTTP host (repeatable)")
 	fs.Var(&mounts, "mount", "Mount spec virtual:host:mode (repeatable)")
@@ -203,6 +217,18 @@ func runCmd(args []string) {
 	var runOpts []executor.Option
 	runOpts = append(runOpts, executor.WithTimeout(*timeout))
 
+	// Security limits
+	runOpts = append(runOpts,
+		executor.WithKVMaxKeySize(*kvMaxKey),
+		executor.WithKVMaxValueSize(*kvMaxValue),
+		executor.WithKVMaxEntries(*kvMaxEntries),
+		executor.WithHTTPMaxURLLength(*httpMaxURL),
+		executor.WithHTTPMaxBodySize(*httpMaxBody),
+		executor.WithFSMaxFileSize(*fsMaxFile),
+		executor.WithFSMaxWriteSize(*fsMaxWrite),
+		executor.WithFSMaxPathLength(*fsMaxPath),
+	)
+
 	if len(allowedHosts) > 0 {
 		runOpts = append(runOpts, executor.WithAllowedHosts(allowedHosts))
 	}
@@ -228,9 +254,10 @@ func runCmd(args []string) {
 // --- Serve Command ---
 
 type sessionStore struct {
-	stores map[string]*sessionEntry
-	mu     sync.RWMutex
-	ttl    time.Duration
+	stores    map[string]*sessionEntry
+	mu        sync.RWMutex
+	ttl       time.Duration
+	kvOptions []hostfunc.KVOption
 }
 
 type sessionEntry struct {
@@ -238,10 +265,11 @@ type sessionEntry struct {
 	lastUsed time.Time
 }
 
-func newSessionStore(ttl time.Duration) *sessionStore {
+func newSessionStore(ttl time.Duration, kvOptions []hostfunc.KVOption) *sessionStore {
 	s := &sessionStore{
-		stores: make(map[string]*sessionEntry),
-		ttl:    ttl,
+		stores:    make(map[string]*sessionEntry),
+		ttl:       ttl,
+		kvOptions: kvOptions,
 	}
 	go s.cleanup()
 	return s
@@ -249,7 +277,7 @@ func newSessionStore(ttl time.Duration) *sessionStore {
 
 func (s *sessionStore) get(sessionID string) *hostfunc.KVStore {
 	if sessionID == "" {
-		return hostfunc.NewKVStore()
+		return hostfunc.NewKVStore(s.kvOptions...)
 	}
 
 	s.mu.Lock()
@@ -257,7 +285,7 @@ func (s *sessionStore) get(sessionID string) *hostfunc.KVStore {
 
 	entry, ok := s.stores[sessionID]
 	if !ok {
-		entry = &sessionEntry{kv: hostfunc.NewKVStore()}
+		entry = &sessionEntry{kv: hostfunc.NewKVStore(s.kvOptions...)}
 		s.stores[sessionID] = entry
 	}
 	entry.lastUsed = time.Now()
@@ -303,6 +331,15 @@ func serveCmd(args []string) {
 		noCache      = fs.Bool("no-cache", false, "Disable compilation cache")
 		allowedHosts stringSlice
 		mounts       stringSlice
+		// Security limits
+		kvMaxKey     = fs.Int("kv-max-key", 1024, "Max KV key size")
+		kvMaxValue   = fs.Int("kv-max-value", 1024*1024, "Max KV value size")
+		kvMaxEntries = fs.Int("kv-max-entries", 10000, "Max KV entries")
+		httpMaxURL   = fs.Int("http-max-url", 8192, "Max HTTP URL length")
+		httpMaxBody  = fs.Int64("http-max-body", 1024*1024, "Max HTTP response body")
+		fsMaxFile    = fs.Int64("fs-max-file", 10*1024*1024, "Max file read size")
+		fsMaxWrite   = fs.Int64("fs-max-write", 10*1024*1024, "Max file write size")
+		fsMaxPath    = fs.Int("fs-max-path", 4096, "Max path length")
 	)
 	fs.Var(&allowedHosts, "allow-host", "Allowed HTTP host (repeatable)")
 	fs.Var(&mounts, "mount", "Mount spec virtual:host:mode (repeatable)")
@@ -335,7 +372,12 @@ func serveCmd(args []string) {
 	}
 	defer exec.Close()
 
-	sessions := newSessionStore(*sessionTTL)
+	kvOpts := []hostfunc.KVOption{
+		hostfunc.WithMaxKeySize(*kvMaxKey),
+		hostfunc.WithMaxValueSize(*kvMaxValue),
+		hostfunc.WithMaxEntries(*kvMaxEntries),
+	}
+	sessions := newSessionStore(*sessionTTL, kvOpts)
 
 	http.HandleFunc("/execute", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -364,6 +406,18 @@ func serveCmd(args []string) {
 		var runOpts []executor.Option
 		runOpts = append(runOpts, executor.WithTimeout(execTimeout))
 		runOpts = append(runOpts, executor.WithKVStore(sessions.get(req.SessionID)))
+
+		// Security limits (KV limits applied at session creation, these are for non-session usage)
+		runOpts = append(runOpts,
+			executor.WithKVMaxKeySize(*kvMaxKey),
+			executor.WithKVMaxValueSize(*kvMaxValue),
+			executor.WithKVMaxEntries(*kvMaxEntries),
+			executor.WithHTTPMaxURLLength(*httpMaxURL),
+			executor.WithHTTPMaxBodySize(*httpMaxBody),
+			executor.WithFSMaxFileSize(*fsMaxFile),
+			executor.WithFSMaxWriteSize(*fsMaxWrite),
+			executor.WithFSMaxPathLength(*fsMaxPath),
+		)
 
 		if len(allowedHosts) > 0 {
 			runOpts = append(runOpts, executor.WithAllowedHosts(allowedHosts))

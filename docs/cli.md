@@ -29,6 +29,14 @@ goru run [options] [file]
 | `-allow-host` | Allow HTTP host (repeatable) | - |
 | `-mount` | Mount spec (repeatable) | - |
 | `-no-cache` | Disable disk cache | false |
+| `-kv-max-key` | Max KV key size | 1024 |
+| `-kv-max-value` | Max KV value size | 1048576 |
+| `-kv-max-entries` | Max KV entries | 10000 |
+| `-http-max-url` | Max HTTP URL length | 8192 |
+| `-http-max-body` | Max HTTP response body | 1048576 |
+| `-fs-max-file` | Max file read size | 10485760 |
+| `-fs-max-write` | Max file write size | 10485760 |
+| `-fs-max-path` | Max path length | 4096 |
 
 **Examples:**
 
@@ -69,6 +77,14 @@ goru serve [options]
 | `-allow-host` | Allow HTTP host (repeatable) | - |
 | `-mount` | Mount spec (repeatable) | - |
 | `-no-cache` | Disable disk cache | false |
+| `-kv-max-key` | Max KV key size | 1024 |
+| `-kv-max-value` | Max KV value size | 1048576 |
+| `-kv-max-entries` | Max KV entries | 10000 |
+| `-http-max-url` | Max HTTP URL length | 8192 |
+| `-http-max-body` | Max HTTP response body | 1048576 |
+| `-fs-max-file` | Max file read size | 10485760 |
+| `-fs-max-write` | Max file write size | 10485760 |
+| `-fs-max-path` | Max path length | 4096 |
 
 **API:**
 
