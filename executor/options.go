@@ -14,6 +14,11 @@ type runConfig struct {
 	allowedHosts []string
 	kvStore      *hostfunc.KVStore
 	mounts       []hostfunc.Mount
+	// Security limits
+	kvOptions        []hostfunc.KVOption
+	httpMaxURLLength int
+	httpMaxBodySize  int64
+	fsOptions        []hostfunc.FSOption
 }
 
 func defaultRunConfig() runConfig {
@@ -65,6 +70,64 @@ func WithMount(virtualPath, hostPath string, mode hostfunc.MountMode) Option {
 			HostPath:    hostPath,
 			Mode:        mode,
 		})
+	}
+}
+
+// Security limit options
+
+// WithKVMaxKeySize sets the maximum key size for KV store operations.
+func WithKVMaxKeySize(size int) Option {
+	return func(c *runConfig) {
+		c.kvOptions = append(c.kvOptions, hostfunc.WithMaxKeySize(size))
+	}
+}
+
+// WithKVMaxValueSize sets the maximum value size for KV store operations.
+func WithKVMaxValueSize(size int) Option {
+	return func(c *runConfig) {
+		c.kvOptions = append(c.kvOptions, hostfunc.WithMaxValueSize(size))
+	}
+}
+
+// WithKVMaxEntries sets the maximum number of entries in the KV store.
+func WithKVMaxEntries(n int) Option {
+	return func(c *runConfig) {
+		c.kvOptions = append(c.kvOptions, hostfunc.WithMaxEntries(n))
+	}
+}
+
+// WithHTTPMaxURLLength sets the maximum URL length for HTTP requests.
+func WithHTTPMaxURLLength(size int) Option {
+	return func(c *runConfig) {
+		c.httpMaxURLLength = size
+	}
+}
+
+// WithHTTPMaxBodySize sets the maximum response body size for HTTP requests.
+func WithHTTPMaxBodySize(size int64) Option {
+	return func(c *runConfig) {
+		c.httpMaxBodySize = size
+	}
+}
+
+// WithFSMaxFileSize sets the maximum file size for read operations.
+func WithFSMaxFileSize(size int64) Option {
+	return func(c *runConfig) {
+		c.fsOptions = append(c.fsOptions, hostfunc.WithMaxFileSize(size))
+	}
+}
+
+// WithFSMaxWriteSize sets the maximum content size for write operations.
+func WithFSMaxWriteSize(size int64) Option {
+	return func(c *runConfig) {
+		c.fsOptions = append(c.fsOptions, hostfunc.WithMaxWriteSize(size))
+	}
+}
+
+// WithFSMaxPathLength sets the maximum path length for filesystem operations.
+func WithFSMaxPathLength(length int) Option {
+	return func(c *runConfig) {
+		c.fsOptions = append(c.fsOptions, hostfunc.WithMaxPathLength(length))
 	}
 }
 

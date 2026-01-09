@@ -113,7 +113,7 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 	// Add KV store (per-run or shared)
 	kv := cfg.kvStore
 	if kv == nil {
-		kv = hostfunc.NewKVStore()
+		kv = hostfunc.NewKVStore(cfg.kvOptions...)
 	}
 	registry.Register("kv_get", kv.Get)
 	registry.Register("kv_set", kv.Set)
@@ -121,14 +121,17 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 
 	// Add HTTP if hosts allowed
 	if len(cfg.allowedHosts) > 0 {
-		registry.Register("http_get", hostfunc.NewHTTPGet(hostfunc.HTTPConfig{
+		httpCfg := hostfunc.HTTPConfig{
 			AllowedHosts: cfg.allowedHosts,
-		}))
+			MaxURLLength: cfg.httpMaxURLLength,
+			MaxBodySize:  cfg.httpMaxBodySize,
+		}
+		registry.Register("http_get", hostfunc.NewHTTPGet(httpCfg))
 	}
 
 	// Add filesystem if mounts configured
 	if len(cfg.mounts) > 0 {
-		fs := hostfunc.NewFS(cfg.mounts)
+		fs := hostfunc.NewFS(cfg.mounts, cfg.fsOptions...)
 		registry.Register("fs_read", fs.Read)
 		registry.Register("fs_write", fs.Write)
 		registry.Register("fs_list", fs.List)
