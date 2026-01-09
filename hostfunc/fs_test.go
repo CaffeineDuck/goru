@@ -259,7 +259,7 @@ func TestFSStat(t *testing.T) {
 	if stat["size"].(int64) != 5 {
 		t.Errorf("expected size 5, got %v", stat["size"])
 	}
-	if stat["isDir"].(bool) != false {
-		t.Error("expected isDir to be false")
+	if stat["is_dir"].(bool) != false {
+		t.Error("expected is_dir to be false")
 	}
 }

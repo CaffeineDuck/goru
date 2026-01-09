@@ -179,8 +179,8 @@ func (f *FS) List(ctx context.Context, args map[string]any) (any, error) {
 	for _, entry := range entries {
 		info, _ := entry.Info()
 		item := map[string]any{
-			"name":  entry.Name(),
-			"isDir": entry.IsDir(),
+			"name":   entry.Name(),
+			"is_dir": entry.IsDir(),
 		}
 		if info != nil {
 			item["size"] = info.Size()
@@ -285,10 +285,10 @@ func (f *FS) Stat(ctx context.Context, args map[string]any) (any, error) {
 	}
 
 	return map[string]any{
-		"name":    info.Name(),
-		"size":    info.Size(),
-		"isDir":   info.IsDir(),
-		"modTime": info.ModTime().Unix(),
+		"name":     info.Name(),
+		"size":     info.Size(),
+		"is_dir":   info.IsDir(),
+		"mod_time": info.ModTime().Unix(),
 	}, nil
 }
 

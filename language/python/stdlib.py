@@ -30,7 +30,7 @@ def fs_write(path, content):
     return _goru_call("fs_write", {"path": path, "content": content})
 
 def fs_list(path):
-    """List directory contents. Returns list of {name, isDir, size}."""
+    """List directory contents. Returns list of {name, is_dir, size}."""
     return _goru_call("fs_list", {"path": path})
 
 def fs_exists(path):
@@ -46,5 +46,5 @@ def fs_remove(path):
     return _goru_call("fs_remove", {"path": path})
 
 def fs_stat(path):
-    """Get file/directory info. Returns {name, size, isDir, modTime}."""
+    """Get file/directory info. Returns {name, size, is_dir, mod_time}."""
     return _goru_call("fs_stat", {"path": path})

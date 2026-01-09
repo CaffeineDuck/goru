@@ -130,7 +130,7 @@ config = json.loads(fs_read("/data/config.json"))
 
 # List directory contents
 for entry in fs_list("/data"):
-    print(f"{entry['name']} - {'dir' if entry['isDir'] else entry['size']} bytes")
+    print(f"{entry['name']} - {'dir' if entry['is_dir'] else entry['size']} bytes")
 
 # Check if file exists
 if fs_exists("/data/optional.txt"):
@@ -144,7 +144,7 @@ fs_mkdir("/workspace/subdir")
 
 # Get file info
 stat = fs_stat("/data/file.txt")
-print(f"Size: {stat['size']}, Modified: {stat['modTime']}")
+print(f"Size: {stat['size']}, Modified: {stat['mod_time']}")
 
 # Remove files (requires MountReadWrite or higher)
 fs_remove("/workspace/temp.txt")
@@ -309,9 +309,78 @@ See `language/python/python.go` for a complete example.
 - **Notebooks** — REPL environments with controlled access
 - **CI/CD** — Run untrusted build scripts securely
 
+## Python Runtime Details
+
+goru uses **CPython 3.12.0** compiled to WebAssembly (WASI target) from [VMware Labs WebAssembly Language Runtimes](https://github.com/vmware-labs/webassembly-language-runtimes).
+
+### What Works
+
+175 stdlib modules are available:
+
+| Category | Modules |
+|----------|---------|
+| Data | json, csv, pickle, struct, base64, hashlib |
+| Text | re, string, textwrap, difflib |
+| Collections | collections, itertools, functools, heapq, bisect |
+| Math | math, random, decimal, fractions, statistics |
+| Time | datetime, calendar, time, zoneinfo |
+| Typing | typing, dataclasses, enum, abc |
+| Parsing | ast, tokenize, argparse, configparser |
+| Other | pathlib, asyncio, sqlite3 (in-memory), unittest |
+
+### What Doesn't Work
+
+These are blocked at the WASI level:
+
+| Module | Reason |
+|--------|--------|
+| `multiprocessing` | WASI has no process support |
+| `ssl` | Not compiled into the WASM build |
+| `socket` (raw) | No `getaddrinfo`, can't make connections |
+| `subprocess` | WASI doesn't support spawning processes |
+| `http.client.HTTPSConnection` | Requires ssl |
+| `os.listdir`, `open()` | No filesystem unless mounts configured |
+
+### Host Functions
+
+Host functions are the escape hatch. They let sandboxed code call back into Go.
+
+**Type stubs** are provided at `language/python/goru.pyi` for IDE autocomplete:
+
+```python
+from typing import TypedDict
+
+class HTTPResponse(TypedDict):
+    status: int
+    body: str
+
+class FSEntry(TypedDict):
+    name: str
+    is_dir: bool
+    size: int
+
+class FSStatResult(TypedDict):
+    name: str
+    size: int
+    is_dir: bool
+    mod_time: int
+
+def kv_get(key: str) -> str | None: ...
+def kv_set(key: str, value: str) -> str: ...
+def kv_delete(key: str) -> str: ...
+def http_get(url: str) -> HTTPResponse: ...
+def fs_read(path: str) -> str: ...
+def fs_write(path: str, content: str) -> str: ...
+def fs_list(path: str) -> list[FSEntry]: ...
+def fs_exists(path: str) -> bool: ...
+def fs_mkdir(path: str) -> str: ...
+def fs_remove(path: str) -> str: ...
+def fs_stat(path: str) -> FSStatResult: ...
+```
+
 ## Roadmap
 
-- [x] Python support (RustPython WASM)
+- [x] Python support (CPython 3.12 WASM)
 - [x] Compilation caching (in-memory + disk)
 - [x] HTTP host functions
 - [x] Key-value storage

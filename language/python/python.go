@@ -24,7 +24,7 @@ func (p *Python) Name() string {
 	return "python"
 }
 
-// Module returns the RustPython WASM binary.
+// Module returns the CPython 3.12 WASM binary (VMware Labs WASI build).
 func (p *Python) Module() []byte {
 	return wasmModule
 }
