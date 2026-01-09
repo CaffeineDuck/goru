@@ -59,6 +59,9 @@ func New(registry *hostfunc.Registry, opts ...ExecutorOption) (*Executor, error)
 	if cache != nil {
 		rtConfig = rtConfig.WithCompilationCache(cache)
 	}
+	if cfg.memoryLimitPages > 0 {
+		rtConfig = rtConfig.WithMemoryLimitPages(cfg.memoryLimitPages)
+	}
 
 	rt := wazero.NewRuntimeWithConfig(ctx, rtConfig)
 	wasi_snapshot_preview1.MustInstantiate(ctx, rt)

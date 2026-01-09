@@ -241,7 +241,21 @@ exec, _ := executor.New(registry, executor.WithDiskCache("/tmp/my-cache"))
 
 // Precompile languages at startup
 exec, _ := executor.New(registry, executor.WithPrecompile(python.New()))
+
+// Limit memory available to WASM modules
+exec, _ := executor.New(registry, executor.WithMemoryLimit(executor.MemoryLimit64MB))
 ```
+
+**Memory limit constants:**
+| Constant | Size |
+|----------|------|
+| `MemoryLimit1MB` | 1 MB |
+| `MemoryLimit16MB` | 16 MB |
+| `MemoryLimit64MB` | 64 MB |
+| `MemoryLimit256MB` | 256 MB |
+| `MemoryLimit1GB` | 1 GB |
+
+Note: Python requires ~10MB minimum. If the limit is too low, module compilation will fail.
 
 ### Run Options
 

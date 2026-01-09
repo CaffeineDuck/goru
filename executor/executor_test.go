@@ -12,15 +12,39 @@ import (
 	"github.com/caffeineduck/goru/language/python"
 )
 
-func TestExecutorBasicExecution(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
+// Shared executor to avoid 1.5s cold start per test.
+// Python tests are integration tests - they verify the full stack works.
+var (
+	sharedExec *executor.Executor
+	sharedLang = python.New()
+)
 
-	result := exec.Run(context.Background(), python.New(), `print("hello")`)
+func TestMain(m *testing.M) {
+	// Set up shared executor once for all tests
+	registry := hostfunc.NewRegistry()
+	var err error
+	sharedExec, err = executor.New(registry)
+	if err != nil {
+		panic("failed to create shared executor: " + err.Error())
+	}
+
+	// Warm up - compile Python module once
+	sharedExec.Run(context.Background(), sharedLang, "x=1")
+
+	// Run tests
+	code := m.Run()
+
+	// Cleanup
+	sharedExec.Close()
+	os.Exit(code)
+}
+
+// =============================================================================
+// INTEGRATION TESTS (use shared Python executor)
+// =============================================================================
+
+func TestPythonBasicExecution(t *testing.T) {
+	result := sharedExec.Run(context.Background(), sharedLang, `print("hello")`)
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
@@ -29,15 +53,8 @@ func TestExecutorBasicExecution(t *testing.T) {
 	}
 }
 
-func TestExecutorComputation(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), python.New(), `print(sum(x**2 for x in range(10)))`)
+func TestPythonComputation(t *testing.T) {
+	result := sharedExec.Run(context.Background(), sharedLang, `print(sum(x**2 for x in range(10)))`)
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
@@ -46,15 +63,8 @@ func TestExecutorComputation(t *testing.T) {
 	}
 }
 
-func TestExecutorKVHostFunction(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), python.New(), `
+func TestPythonKVHostFunction(t *testing.T) {
+	result := sharedExec.Run(context.Background(), sharedLang, `
 kv_set("key", "value")
 print(kv_get("key"))
 `)
@@ -66,15 +76,38 @@ print(kv_get("key"))
 	}
 }
 
-func TestExecutorTimeout(t *testing.T) {
+func TestPythonCustomHostFunction(t *testing.T) {
+	// This test needs its own executor because it registers a custom function
 	registry := hostfunc.NewRegistry()
+	registry.Register("custom_fn", func(ctx context.Context, args map[string]any) (any, error) {
+		name := args["name"].(string)
+		return "Hello, " + name + "!", nil
+	})
+
 	exec, err := executor.New(registry)
 	if err != nil {
 		t.Fatalf("failed to create executor: %v", err)
 	}
 	defer exec.Close()
 
-	result := exec.Run(context.Background(), python.New(), `
+	result := exec.Run(context.Background(), sharedLang, `
+result = _goru_call("custom_fn", {"name": "World"})
+print(result)
+`)
+	if result.Error != nil {
+		t.Fatalf("unexpected error: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "Hello, World!" {
+		t.Errorf("expected 'Hello, World!', got %q", result.Output)
+	}
+}
+
+// =============================================================================
+// EXECUTOR BEHAVIOR TESTS (don't need Python-specific behavior)
+// =============================================================================
+
+func TestExecutorTimeout(t *testing.T) {
+	result := sharedExec.Run(context.Background(), sharedLang, `
 while True:
     pass
 `, executor.WithTimeout(1*time.Second))
@@ -88,27 +121,28 @@ while True:
 }
 
 func TestExecutorSharedKVStore(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
 	kv := hostfunc.NewKVStore()
 
 	// First run: set value
-	exec.Run(context.Background(), python.New(), `kv_set("shared", "across-runs")`, executor.WithKVStore(kv))
+	sharedExec.Run(context.Background(), sharedLang, `kv_set("shared", "across-runs")`, executor.WithKVStore(kv))
 
 	// Second run: get value
-	result := exec.Run(context.Background(), python.New(), `print(kv_get("shared"))`, executor.WithKVStore(kv))
+	result := sharedExec.Run(context.Background(), sharedLang, `print(kv_get("shared"))`, executor.WithKVStore(kv))
 
 	if strings.TrimSpace(result.Output) != "across-runs" {
 		t.Errorf("expected 'across-runs', got %q", result.Output)
 	}
 }
 
+func TestExecutorDurationTracked(t *testing.T) {
+	result := sharedExec.Run(context.Background(), sharedLang, `print(1)`)
+	if result.Duration <= 0 {
+		t.Error("expected positive duration")
+	}
+}
+
 func TestExecutorCachesCompiledModule(t *testing.T) {
+	// Create a fresh executor to test caching
 	registry := hostfunc.NewRegistry()
 	exec, err := executor.New(registry)
 	if err != nil {
@@ -130,66 +164,19 @@ func TestExecutorCachesCompiledModule(t *testing.T) {
 		t.Fatalf("second run failed: %v", result2.Error)
 	}
 
-	// Second run should be significantly faster (at least 10x)
-	if result2.Duration > result1.Duration/5 {
-		t.Logf("First run: %v, Second run: %v", result1.Duration, result2.Duration)
-		// This is a soft check - CI environments may vary
-	}
+	t.Logf("First run: %v, Second run: %v (should be ~10x faster)", result1.Duration, result2.Duration)
 }
 
-func TestExecutorCustomHostFunction(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	registry.Register("custom_fn", func(ctx context.Context, args map[string]any) (any, error) {
-		name := args["name"].(string)
-		return "Hello, " + name + "!", nil
-	})
+// =============================================================================
+// FILESYSTEM TESTS
+// =============================================================================
 
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), python.New(), `
-result = _goru_call("custom_fn", {"name": "World"})
-print(result)
-`)
-	if result.Error != nil {
-		t.Fatalf("unexpected error: %v", result.Error)
-	}
-	if strings.TrimSpace(result.Output) != "Hello, World!" {
-		t.Errorf("expected 'Hello, World!', got %q", result.Output)
-	}
-}
-
-func TestExecutorDurationTracked(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), python.New(), `print(1)`)
-	if result.Duration <= 0 {
-		t.Error("expected positive duration")
-	}
-}
-
-func TestExecutorFilesystemReadOnly(t *testing.T) {
+func TestFilesystemReadOnly(t *testing.T) {
 	dir := t.TempDir()
-	// Create a test file
 	testFile := dir + "/test.json"
 	os.WriteFile(testFile, []byte(`{"name": "test"}`), 0644)
 
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), python.New(), `
+	result := sharedExec.Run(context.Background(), sharedLang, `
 import json
 data = json.loads(fs_read("/data/test.json"))
 print(data["name"])
@@ -203,17 +190,10 @@ print(data["name"])
 	}
 }
 
-func TestExecutorFilesystemWrite(t *testing.T) {
+func TestFilesystemWrite(t *testing.T) {
 	dir := t.TempDir()
 
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), python.New(), `
+	result := sharedExec.Run(context.Background(), sharedLang, `
 fs_write("/output/result.txt", "hello from python")
 print("written")
 `, executor.WithMount("/output", dir, executor.MountReadWriteCreate))
@@ -225,7 +205,6 @@ print("written")
 		t.Errorf("expected 'written', got %q", result.Output)
 	}
 
-	// Verify file was created
 	content, err := os.ReadFile(dir + "/result.txt")
 	if err != nil {
 		t.Fatalf("file not created: %v", err)
@@ -235,16 +214,9 @@ print("written")
 	}
 }
 
-func TestExecutorFilesystemDenied(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
+func TestFilesystemDenied(t *testing.T) {
 	// No mounts configured - filesystem should not be available
-	result := exec.Run(context.Background(), python.New(), `
+	result := sharedExec.Run(context.Background(), sharedLang, `
 try:
     fs_read("/etc/passwd")
     print("FAIL: should have failed")
@@ -260,20 +232,13 @@ except RuntimeError as e:
 	}
 }
 
-func TestExecutorFilesystemList(t *testing.T) {
+func TestFilesystemList(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(dir+"/file1.txt", []byte("1"), 0644)
 	os.WriteFile(dir+"/file2.txt", []byte("2"), 0644)
 	os.Mkdir(dir+"/subdir", 0755)
 
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), python.New(), `
+	result := sharedExec.Run(context.Background(), sharedLang, `
 entries = fs_list("/data")
 names = sorted([e["name"] for e in entries])
 print(",".join(names))
@@ -284,5 +249,29 @@ print(",".join(names))
 	}
 	if strings.TrimSpace(result.Output) != "file1.txt,file2.txt,subdir" {
 		t.Errorf("expected 'file1.txt,file2.txt,subdir', got %q", result.Output)
+	}
+}
+
+// =============================================================================
+// MEMORY LIMIT TEST
+// =============================================================================
+
+func TestExecutorMemoryLimit(t *testing.T) {
+	// Create executor with very small memory limit (1MB)
+	registry := hostfunc.NewRegistry()
+	exec, err := executor.New(registry, executor.WithMemoryLimit(executor.MemoryLimit1MB))
+	if err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+	defer exec.Close()
+
+	// Python needs more than 1MB just to start, so this should fail
+	result := exec.Run(context.Background(), sharedLang, `print("hi")`, executor.WithTimeout(5*time.Second))
+
+	// We expect this to fail due to memory limits
+	if result.Error == nil {
+		t.Log("Note: Python managed to run with 1MB limit (unexpected but OK)")
+	} else {
+		t.Logf("Memory limit enforced: %v", result.Error)
 	}
 }

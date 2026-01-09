@@ -72,14 +72,16 @@ func WithMount(virtualPath, hostPath string, mode hostfunc.MountMode) Option {
 type ExecutorOption func(*executorConfig)
 
 type executorConfig struct {
-	diskCache  bool
-	cacheDir   string
-	precompile []Language // Languages to precompile at startup
+	diskCache        bool
+	cacheDir         string
+	precompile       []Language // Languages to precompile at startup
+	memoryLimitPages uint32     // Max memory pages (each page = 64KB), 0 = default (4GB)
 }
 
 func defaultExecutorConfig() executorConfig {
 	return executorConfig{
-		diskCache: false,
+		diskCache:        false,
+		memoryLimitPages: 0, // 0 means use wazero default (65536 pages = 4GB)
 	}
 }
 
@@ -106,3 +108,26 @@ func WithPrecompile(langs ...Language) ExecutorOption {
 		c.precompile = langs
 	}
 }
+
+// WithMemoryLimit sets the maximum memory available to WASM modules.
+// Each page is 64KB. Examples:
+//   - WithMemoryLimit(16) = 1MB max
+//   - WithMemoryLimit(256) = 16MB max
+//   - WithMemoryLimit(1024) = 64MB max
+//   - WithMemoryLimit(4096) = 256MB max
+//
+// Default is 0 (no limit, up to 4GB).
+func WithMemoryLimit(pages uint32) ExecutorOption {
+	return func(c *executorConfig) {
+		c.memoryLimitPages = pages
+	}
+}
+
+// Memory limit constants for convenience.
+const (
+	MemoryLimit1MB   uint32 = 16    // 1 MB
+	MemoryLimit16MB  uint32 = 256   // 16 MB
+	MemoryLimit64MB  uint32 = 1024  // 64 MB
+	MemoryLimit256MB uint32 = 4096  // 256 MB
+	MemoryLimit1GB   uint32 = 16384 // 1 GB
+)
