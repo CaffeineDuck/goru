@@ -1,7 +1,7 @@
 // goru host function bindings for JavaScript
 
 // =============================================================================
-// Synchronous Host Function Protocol
+// Internal: Synchronous Host Function Protocol
 // =============================================================================
 
 const _goru_call = (fn, args) => {
@@ -15,11 +15,11 @@ const _goru_call = (fn, args) => {
 };
 
 // =============================================================================
-// Async Support - Batched host calls with Promises
+// Internal: Async Support - Batched host calls with Promises
 // =============================================================================
 
 const _asyncBatch = {
-  pending: new Map(),  // id -> {resolve, reject}
+  pending: new Map(),
   nextId: 0,
 
   queue(fn, args) {
@@ -27,7 +27,6 @@ const _asyncBatch = {
     const promise = new Promise((resolve, reject) => {
       this.pending.set(id, {resolve, reject});
     });
-    // Send request with ID (non-blocking, just queues)
     std.err.puts("\x00GORU:" + JSON.stringify({id, fn, args}) + "\x00");
     std.err.flush();
     return promise;
@@ -35,12 +34,9 @@ const _asyncBatch = {
 
   flush() {
     if (this.pending.size === 0) return;
-
     const count = this.pending.size;
     std.err.puts("\x00GORU_FLUSH:" + count + "\x00");
     std.err.flush();
-
-    // Read exactly 'count' responses
     for (let i = 0; i < count; i++) {
       const line = std.in.getline();
       const resp = JSON.parse(line);
@@ -58,54 +54,158 @@ const _asyncBatch = {
   }
 };
 
-// Async call helper - returns a Promise
-const asyncCall = (fn, args) => _asyncBatch.queue(fn, args);
-
-// Flush pending requests and resolve promises
+const _asyncCall = (fn, args) => _asyncBatch.queue(fn, args);
 const flushAsync = () => _asyncBatch.flush();
 
-// Run multiple async operations concurrently (like Promise.all but with flush)
 const runAsync = async (...promises) => {
-  // Flush to process all queued requests
   flushAsync();
-  // Wait for all promises
   return Promise.all(promises);
 };
 
 // =============================================================================
-// Time Functions
+// kv - Key-Value Store Module
+// =============================================================================
+
+const kv = {
+  get(key, defaultValue = null) {
+    const result = _goru_call("kv_get", {key});
+    return result !== null ? result : defaultValue;
+  },
+
+  set(key, value) {
+    return _goru_call("kv_set", {key, value});
+  },
+
+  delete(key) {
+    return _goru_call("kv_delete", {key});
+  },
+
+  async asyncGet(key, defaultValue = null) {
+    const result = await _asyncCall("kv_get", {key});
+    return result !== null ? result : defaultValue;
+  },
+
+  async asyncSet(key, value) {
+    return await _asyncCall("kv_set", {key, value});
+  },
+
+  async asyncDelete(key) {
+    return await _asyncCall("kv_delete", {key});
+  }
+};
+
+// =============================================================================
+// http - HTTP Client Module
+// =============================================================================
+
+class HTTPResponse {
+  constructor(data) {
+    this._data = data;
+    this.statusCode = data.status || 0;
+    this.text = data.body || "";
+  }
+
+  get ok() {
+    return this.statusCode >= 200 && this.statusCode < 300;
+  }
+
+  json() {
+    return JSON.parse(this.text);
+  }
+}
+
+const http = {
+  get(url) {
+    const data = _goru_call("http_get", {url});
+    return new HTTPResponse(data);
+  },
+
+  async asyncGet(url) {
+    const data = await _asyncCall("http_get", {url});
+    return new HTTPResponse(data);
+  }
+};
+
+// =============================================================================
+// fs - Filesystem Module
+// =============================================================================
+
+const fs = {
+  readText(path) {
+    return _goru_call("fs_read", {path});
+  },
+
+  readJson(path) {
+    return JSON.parse(this.readText(path));
+  },
+
+  writeText(path, content) {
+    return _goru_call("fs_write", {path, content});
+  },
+
+  writeJson(path, data, indent = null) {
+    const content = indent ? JSON.stringify(data, null, indent) : JSON.stringify(data);
+    return this.writeText(path, content);
+  },
+
+  listdir(path) {
+    return _goru_call("fs_list", {path});
+  },
+
+  exists(path) {
+    return _goru_call("fs_exists", {path});
+  },
+
+  mkdir(path) {
+    return _goru_call("fs_mkdir", {path});
+  },
+
+  remove(path) {
+    return _goru_call("fs_remove", {path});
+  },
+
+  stat(path) {
+    return _goru_call("fs_stat", {path});
+  },
+
+  // Async versions
+  async asyncReadText(path) {
+    return await _asyncCall("fs_read", {path});
+  },
+
+  async asyncReadJson(path) {
+    const text = await this.asyncReadText(path);
+    return JSON.parse(text);
+  },
+
+  async asyncWriteText(path, content) {
+    return await _asyncCall("fs_write", {path, content});
+  },
+
+  async asyncListdir(path) {
+    return await _asyncCall("fs_list", {path});
+  },
+
+  async asyncExists(path) {
+    return await _asyncCall("fs_exists", {path});
+  },
+
+  async asyncMkdir(path) {
+    return await _asyncCall("fs_mkdir", {path});
+  },
+
+  async asyncRemove(path) {
+    return await _asyncCall("fs_remove", {path});
+  },
+
+  async asyncStat(path) {
+    return await _asyncCall("fs_stat", {path});
+  }
+};
+
+// =============================================================================
+// Time
 // =============================================================================
 
 const time_now = () => _goru_call("time_now", {});
 
-// =============================================================================
-// Synchronous Host Functions
-// =============================================================================
-
-const kv_get = (key) => _goru_call("kv_get", {key});
-const kv_set = (key, value) => _goru_call("kv_set", {key, value});
-const kv_delete = (key) => _goru_call("kv_delete", {key});
-const http_get = (url) => _goru_call("http_get", {url});
-const fs_read = (path) => _goru_call("fs_read", {path});
-const fs_write = (path, content) => _goru_call("fs_write", {path, content});
-const fs_list = (path) => _goru_call("fs_list", {path});
-const fs_exists = (path) => _goru_call("fs_exists", {path});
-const fs_mkdir = (path) => _goru_call("fs_mkdir", {path});
-const fs_remove = (path) => _goru_call("fs_remove", {path});
-const fs_stat = (path) => _goru_call("fs_stat", {path});
-
-// =============================================================================
-// Async Host Functions - return Promises, use with runAsync()
-// =============================================================================
-
-const async_kv_get = (key) => asyncCall("kv_get", {key});
-const async_kv_set = (key, value) => asyncCall("kv_set", {key, value});
-const async_kv_delete = (key) => asyncCall("kv_delete", {key});
-const async_http_get = (url) => asyncCall("http_get", {url});
-const async_fs_read = (path) => asyncCall("fs_read", {path});
-const async_fs_write = (path, content) => asyncCall("fs_write", {path, content});
-const async_fs_list = (path) => asyncCall("fs_list", {path});
-const async_fs_exists = (path) => asyncCall("fs_exists", {path});
-const async_fs_mkdir = (path) => asyncCall("fs_mkdir", {path});
-const async_fs_remove = (path) => asyncCall("fs_remove", {path});
-const async_fs_stat = (path) => asyncCall("fs_stat", {path});

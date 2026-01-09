@@ -65,8 +65,8 @@ func TestPythonComputation(t *testing.T) {
 
 func TestPythonKVHostFunction(t *testing.T) {
 	result := sharedExec.Run(context.Background(), sharedLang, `
-kv_set("key", "value")
-print(kv_get("key"))
+kv.set("key", "value")
+print(kv.get("key"))
 `)
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
@@ -124,10 +124,10 @@ func TestExecutorSharedKVStore(t *testing.T) {
 	kv := hostfunc.NewKVStore()
 
 	// First run: set value
-	sharedExec.Run(context.Background(), sharedLang, `kv_set("shared", "across-runs")`, executor.WithKVStore(kv))
+	sharedExec.Run(context.Background(), sharedLang, `kv.set("shared", "across-runs")`, executor.WithKVStore(kv))
 
 	// Second run: get value
-	result := sharedExec.Run(context.Background(), sharedLang, `print(kv_get("shared"))`, executor.WithKVStore(kv))
+	result := sharedExec.Run(context.Background(), sharedLang, `print(kv.get("shared"))`, executor.WithKVStore(kv))
 
 	if strings.TrimSpace(result.Output) != "across-runs" {
 		t.Errorf("expected 'across-runs', got %q", result.Output)
@@ -177,8 +177,7 @@ func TestFilesystemReadOnly(t *testing.T) {
 	os.WriteFile(testFile, []byte(`{"name": "test"}`), 0644)
 
 	result := sharedExec.Run(context.Background(), sharedLang, `
-import json
-data = json.loads(fs_read("/data/test.json"))
+data = fs.read_json("/data/test.json")
 print(data["name"])
 `, executor.WithMount("/data", dir, executor.MountReadOnly))
 
@@ -194,7 +193,7 @@ func TestFilesystemWrite(t *testing.T) {
 	dir := t.TempDir()
 
 	result := sharedExec.Run(context.Background(), sharedLang, `
-fs_write("/output/result.txt", "hello from python")
+fs.write_text("/output/result.txt", "hello from python")
 print("written")
 `, executor.WithMount("/output", dir, executor.MountReadWriteCreate))
 
@@ -218,7 +217,7 @@ func TestFilesystemDenied(t *testing.T) {
 	// No mounts configured - filesystem should not be available
 	result := sharedExec.Run(context.Background(), sharedLang, `
 try:
-    fs_read("/etc/passwd")
+    fs.read_text("/etc/passwd")
     print("FAIL: should have failed")
 except RuntimeError as e:
     print(f"OK: {e}")
@@ -239,7 +238,7 @@ func TestFilesystemList(t *testing.T) {
 	os.Mkdir(dir+"/subdir", 0755)
 
 	result := sharedExec.Run(context.Background(), sharedLang, `
-entries = fs_list("/data")
+entries = fs.listdir("/data")
 names = sorted([e["name"] for e in entries])
 print(",".join(names))
 `, executor.WithMount("/data", dir, executor.MountReadOnly))
@@ -261,11 +260,11 @@ func TestPythonAsyncKV(t *testing.T) {
 import asyncio
 
 async def main():
-    await async_kv_set("async_a", "value_a")
-    await async_kv_set("async_b", "value_b")
+    await kv.async_set("async_a", "value_a")
+    await kv.async_set("async_b", "value_b")
     results = await asyncio.gather(
-        async_kv_get("async_a"),
-        async_kv_get("async_b")
+        kv.async_get("async_a"),
+        kv.async_get("async_b")
     )
     return results
 
@@ -287,16 +286,16 @@ import asyncio
 
 # Set up data
 for i in range(5):
-    kv_set(f"batch_{i}", str(i * 10))
+    kv.set(f"batch_{i}", str(i * 10))
 
 async def main():
     # These should be batched into a single FLUSH
     results = await asyncio.gather(
-        async_kv_get("batch_0"),
-        async_kv_get("batch_1"),
-        async_kv_get("batch_2"),
-        async_kv_get("batch_3"),
-        async_kv_get("batch_4")
+        kv.async_get("batch_0"),
+        kv.async_get("batch_1"),
+        kv.async_get("batch_2"),
+        kv.async_get("batch_3"),
+        kv.async_get("batch_4")
     )
     return results
 
