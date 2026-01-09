@@ -1,32 +1,24 @@
 # goru
 
-**WASM-based code execution sandbox for Go applications.**
+WASM-based Python sandbox for Go. Run untrusted code without Docker or VMs.
 
-Run untrusted Python (and soon JavaScript) code in a secure, isolated environment — no Docker, no VMs, just a single Go binary.
+## What it does
 
-```go
-exec, _ := executor.New(registry)
-result := exec.Run(ctx, python.New(), `print("Hello from sandbox!")`)
-fmt.Println(result.Output) // "Hello from sandbox!"
-```
+Executes Python code in a WebAssembly sandbox. The sandbox has no filesystem, network, or syscall access by default. You control what it can do through explicit host functions.
 
-## Features
+## Who it's for
 
-- **🔒 Secure by default** — No filesystem, no network, no syscalls unless you explicitly allow them
-- **⚡ Fast warm starts** — 120ms after initial compilation (vs 1.6s cold start)
-- **📦 Single binary** — WASM runtime embedded, no external dependencies
-- **🔌 Extensible** — Define custom host functions to expose your own APIs
-- **🌍 Cross-platform** — Works everywhere Go runs (Linux, macOS, Windows, ARM)
+- Running LLM-generated code safely
+- Plugin systems where users provide Python logic
+- Any case where you need `eval()` without the fear
 
-## Installation
+## Install
 
 ```bash
 go get github.com/caffeineduck/goru
 ```
 
-## Quick Start
-
-### As a Library
+## Usage
 
 ```go
 package main
@@ -34,359 +26,122 @@ package main
 import (
     "context"
     "fmt"
-    
+
     "github.com/caffeineduck/goru/executor"
     "github.com/caffeineduck/goru/hostfunc"
     "github.com/caffeineduck/goru/language/python"
 )
 
 func main() {
-    // Create a registry for host functions
     registry := hostfunc.NewRegistry()
-    
-    // Create an executor (compiles WASM once, reuses for all runs)
     exec, _ := executor.New(registry)
     defer exec.Close()
-    
-    // Run Python code
-    result := exec.Run(context.Background(), python.New(), `
-import json
-data = {"message": "Hello from Python!", "numbers": [1, 2, 3]}
-print(json.dumps(data))
-`)
-    
-    fmt.Println(result.Output)
-    // {"message": "Hello from Python!", "numbers": [1, 2, 3]}
+
+    result := exec.Run(context.Background(), python.New(), `print(sum(x**2 for x in range(10)))`)
+    fmt.Print(result.Output) // 285
 }
 ```
 
-### As a CLI
-
+CLI:
 ```bash
-# Build the CLI
 go build -o goru ./cmd/goru
-
-# Run Python code
-./goru -c 'print("Hello!")'
-
-# Run from file
+./goru -c 'print("hello")'
 ./goru script.py
-
-# With timeout
-./goru -timeout 5s -c 'while True: pass'
+echo 'print(1+1)' | ./goru
 ```
 
 ## Host Functions
 
-Sandboxed code can only interact with the outside world through host functions that you explicitly provide.
+Sandboxed code can only interact with the outside world through host functions you provide.
 
-### Built-in Host Functions
+### Built-in
 
-#### Key-Value Store
+**KV Store** (always available):
 ```python
-# In-memory key-value storage
-kv_set("user:1", '{"name": "Alice"}')
-data = kv_get("user:1")  # Returns '{"name": "Alice"}'
-kv_delete("user:1")
+kv_set("key", "value")
+kv_get("key")      # "value"
+kv_delete("key")
 ```
 
-#### HTTP Requests (with allowlist)
+**HTTP** (requires `WithAllowedHosts`):
 ```go
-// Go: Allow specific hosts
-result := exec.Run(ctx, python.New(), code,
-    executor.WithAllowedHosts([]string{"api.example.com", "httpbin.org"}),
-)
+exec.Run(ctx, python.New(), code, executor.WithAllowedHosts([]string{"api.example.com"}))
 ```
-
 ```python
-# Python: Make requests to allowed hosts only
-response = http_get("https://api.example.com/data")
-print(response["status"])  # 200
-print(response["body"])    # Response body as string
+resp = http_get("https://api.example.com/data")
+print(resp["status"], resp["body"])
 ```
 
-#### Filesystem (with mount points)
-
-Mount host directories with explicit permissions:
-
+**Filesystem** (requires `WithMount`):
 ```go
-// Go: Mount directories with specific permissions
-result := exec.Run(ctx, python.New(), code,
-    // Read-only access to input data
+exec.Run(ctx, python.New(), code,
     executor.WithMount("/data", "./input", executor.MountReadOnly),
-    // Read-write access to output (can modify existing files)
-    executor.WithMount("/output", "./results", executor.MountReadWrite),
-    // Full access including creating new files
-    executor.WithMount("/workspace", "./work", executor.MountReadWriteCreate),
+    executor.WithMount("/out", "./output", executor.MountReadWriteCreate),
 )
 ```
-
 ```python
-# Python: Access mounted directories
-import json
-
-# Read files (requires MountReadOnly or higher)
-config = json.loads(fs_read("/data/config.json"))
-
-# List directory contents
-for entry in fs_list("/data"):
-    print(f"{entry['name']} - {'dir' if entry['is_dir'] else entry['size']} bytes")
-
-# Check if file exists
-if fs_exists("/data/optional.txt"):
-    content = fs_read("/data/optional.txt")
-
-# Write files (requires MountReadWrite or higher)
-fs_write("/output/result.json", json.dumps({"status": "done"}))
-
-# Create directories (requires MountReadWriteCreate)
-fs_mkdir("/workspace/subdir")
-
-# Get file info
-stat = fs_stat("/data/file.txt")
-print(f"Size: {stat['size']}, Modified: {stat['mod_time']}")
-
-# Remove files (requires MountReadWrite or higher)
-fs_remove("/workspace/temp.txt")
+content = fs_read("/data/config.json")
+fs_write("/out/result.txt", "done")
+fs_list("/data")  # [{"name": "file.txt", "is_dir": false, "size": 123}]
 ```
 
-**Permission levels:**
-| Mode | Read | Write existing | Create new | Delete |
-|------|------|----------------|------------|--------|
-| `MountReadOnly` | ✓ | ✗ | ✗ | ✗ |
-| `MountReadWrite` | ✓ | ✓ | ✗ | ✓ |
-| `MountReadWriteCreate` | ✓ | ✓ | ✓ | ✓ |
-
-**Security:** Path traversal attacks (e.g., `../../../etc/passwd`) are blocked. Paths must stay within their mount point.
-
-### Custom Host Functions
+### Custom
 
 ```go
-// Define your own host functions
 registry := hostfunc.NewRegistry()
-
 registry.Register("get_user", func(ctx context.Context, args map[string]any) (any, error) {
-    userID := args["id"].(string)
-    // Look up user in your database
-    return map[string]any{
-        "id":   userID,
-        "name": "Alice",
-    }, nil
+    return map[string]any{"id": args["id"], "name": "Alice"}, nil
 })
-
-registry.Register("send_email", func(ctx context.Context, args map[string]any) (any, error) {
-    to := args["to"].(string)
-    subject := args["subject"].(string)
-    // Send email through your email service
-    return "sent", nil
-})
-
-exec, _ := executor.New(registry)
+```
+```python
+user = _goru_call("get_user", {"id": "123"})
 ```
 
-```python
-# Use custom functions from Python
-user = _goru_call("get_user", {"id": "123"})
-print(f"Hello, {user['name']}!")
+## Configuration
 
-_goru_call("send_email", {
-    "to": "alice@example.com",
-    "subject": "Welcome!"
-})
+```go
+// Executor options (at creation)
+exec, _ := executor.New(registry,
+    executor.WithDiskCache(),                    // faster CLI startup
+    executor.WithPrecompile(python.New()),       // compile at init
+    executor.WithMemoryLimit(executor.MemoryLimit64MB),
+)
+
+// Run options (per execution)
+exec.Run(ctx, python.New(), code,
+    executor.WithTimeout(5*time.Second),
+    executor.WithAllowedHosts([]string{"httpbin.org"}),
+    executor.WithKVStore(sharedKV),
+    executor.WithMount("/data", "./data", executor.MountReadOnly),
+)
 ```
 
 ## Performance
 
-| Mode | Time | Notes |
-|------|------|-------|
-| Cold start | 1.6s | First run compiles WASM |
-| Warm start (in-memory) | 120ms | Reuses compiled module |
-| Warm start (disk cache) | 680ms | CLI repeated calls |
-| Native Python | 14ms | For comparison (not isolated) |
-
-### Parallel Execution
-
-goru shines when running multiple executions in parallel — all share the same compiled runtime:
-
-```go
-exec, _ := executor.New(registry)
-defer exec.Close()
-
-// 10 parallel executions share one compiled runtime
-var wg sync.WaitGroup
-for i := 0; i < 10; i++ {
-    wg.Add(1)
-    go func(n int) {
-        defer wg.Done()
-        exec.Run(ctx, python.New(), fmt.Sprintf("print(%d)", n))
-    }(i)
-}
-wg.Wait()
-```
-
-| Parallel runs | goru | Docker |
-|---------------|------|--------|
-| 10 executions | 225ms | 1,044ms |
-
-## Configuration
-
-### Executor Options
-
-```go
-// Enable disk cache for faster CLI startup (uses ~/.cache/goru)
-exec, _ := executor.New(registry, executor.WithDiskCache())
-
-// Custom cache directory
-exec, _ := executor.New(registry, executor.WithDiskCache("/tmp/my-cache"))
-
-// Precompile languages at startup
-exec, _ := executor.New(registry, executor.WithPrecompile(python.New()))
-
-// Limit memory available to WASM modules
-exec, _ := executor.New(registry, executor.WithMemoryLimit(executor.MemoryLimit64MB))
-```
-
-**Memory limit constants:**
-| Constant | Size |
+| Scenario | Time |
 |----------|------|
-| `MemoryLimit1MB` | 1 MB |
-| `MemoryLimit16MB` | 16 MB |
-| `MemoryLimit64MB` | 64 MB |
-| `MemoryLimit256MB` | 256 MB |
-| `MemoryLimit1GB` | 1 GB |
+| Cold start (first run) | ~1.6s |
+| Warm start (cached) | ~120ms |
+| Native Python | ~14ms |
 
-Note: Python requires ~10MB minimum. If the limit is too low, module compilation will fail.
+The value is isolation, not speed. If you need raw performance, don't use a sandbox.
 
-### Run Options
+## Python Runtime
 
-```go
-result := exec.Run(ctx, lang, code,
-    executor.WithTimeout(30*time.Second),
-    executor.WithAllowedHosts([]string{"api.example.com"}),
-    executor.WithKVStore(sharedKV),  // Share KV across runs
-)
-```
+**CPython 3.12.0** compiled to WASI by [VMware Labs](https://github.com/vmware-labs/webassembly-language-runtimes).
 
-## Adding New Languages
+175 stdlib modules work: json, re, datetime, collections, itertools, math, random, hashlib, csv, dataclasses, typing, pathlib, asyncio, sqlite3 (in-memory), etc.
 
-Implement the `Language` interface to add support for new languages:
+**Blocked** (WASI limitations): multiprocessing, ssl, raw sockets, subprocess, direct filesystem access.
 
-```go
-type Language interface {
-    Name() string              // Unique identifier
-    Module() []byte            // WASM binary
-    WrapCode(code string) string   // Prepend stdlib
-    Args(code string) []string     // CLI args for WASM
-}
-```
-
-See `language/python/python.go` for a complete example.
-
-## Security Model
-
-1. **No capabilities by default** — Sandboxed code cannot access filesystem, network, or system resources
-2. **Explicit host functions** — You define exactly what the sandbox can do
-3. **Allowlists** — HTTP requests require explicit host allowlisting
-4. **Timeouts** — Prevent infinite loops with configurable timeouts
-5. **WASM isolation** — Memory-safe execution, no buffer overflows
-
-## Comparison
-
-| Feature | goru | Docker | Native |
-|---------|------|--------|--------|
-| Isolation | WASM sandbox | Container | None |
-| Startup (warm) | 120ms | 180ms | 14ms |
-| Dependencies | None | Docker daemon | Python |
-| Binary size | 36MB | 144MB+ image | N/A |
-| Fine-grained control | Per-function | Coarse | None |
-| Platform | Anywhere Go runs | Linux (or VM) | Varies |
-
-## Use Cases
-
-- **AI agents** — Let LLMs write and execute code safely
-- **Plugin systems** — Users provide custom logic in Python
-- **Serverless** — Code execution without containers
-- **Notebooks** — REPL environments with controlled access
-- **CI/CD** — Run untrusted build scripts securely
-
-## Python Runtime Details
-
-goru uses **CPython 3.12.0** compiled to WebAssembly (WASI target) from [VMware Labs WebAssembly Language Runtimes](https://github.com/vmware-labs/webassembly-language-runtimes).
-
-### What Works
-
-175 stdlib modules are available:
-
-| Category | Modules |
-|----------|---------|
-| Data | json, csv, pickle, struct, base64, hashlib |
-| Text | re, string, textwrap, difflib |
-| Collections | collections, itertools, functools, heapq, bisect |
-| Math | math, random, decimal, fractions, statistics |
-| Time | datetime, calendar, time, zoneinfo |
-| Typing | typing, dataclasses, enum, abc |
-| Parsing | ast, tokenize, argparse, configparser |
-| Other | pathlib, asyncio, sqlite3 (in-memory), unittest |
-
-### What Doesn't Work
-
-These are blocked at the WASI level:
-
-| Module | Reason |
-|--------|--------|
-| `multiprocessing` | WASI has no process support |
-| `ssl` | Not compiled into the WASM build |
-| `socket` (raw) | No `getaddrinfo`, can't make connections |
-| `subprocess` | WASI doesn't support spawning processes |
-| `http.client.HTTPSConnection` | Requires ssl |
-| `os.listdir`, `open()` | No filesystem unless mounts configured |
-
-### Host Functions
-
-Host functions are the escape hatch. They let sandboxed code call back into Go.
-
-**Type stubs** are provided at `language/python/goru.pyi` for IDE autocomplete:
-
-```python
-from typing import TypedDict
-
-class HTTPResponse(TypedDict):
-    status: int
-    body: str
-
-class FSEntry(TypedDict):
-    name: str
-    is_dir: bool
-    size: int
-
-class FSStatResult(TypedDict):
-    name: str
-    size: int
-    is_dir: bool
-    mod_time: int
-
-def kv_get(key: str) -> str | None: ...
-def kv_set(key: str, value: str) -> str: ...
-def kv_delete(key: str) -> str: ...
-def http_get(url: str) -> HTTPResponse: ...
-def fs_read(path: str) -> str: ...
-def fs_write(path: str, content: str) -> str: ...
-def fs_list(path: str) -> list[FSEntry]: ...
-def fs_exists(path: str) -> bool: ...
-def fs_mkdir(path: str) -> str: ...
-def fs_remove(path: str) -> str: ...
-def fs_stat(path: str) -> FSStatResult: ...
-```
+Type stubs at `language/python/goru.pyi` for IDE autocomplete.
 
 ## Roadmap
 
-- [x] Python support (CPython 3.12 WASM)
-- [x] Compilation caching (in-memory + disk)
-- [x] HTTP host functions
-- [x] Key-value storage
-- [x] Filesystem host functions with mount points
-- [ ] JavaScript support (QuickJS WASM)
-- [ ] Resource limits (memory, CPU time)
+- [x] Python (CPython 3.12)
+- [x] Module caching
+- [x] HTTP, KV, filesystem host functions
+- [ ] JavaScript (QuickJS)
 - [ ] Stdio streaming
 
 ## License
