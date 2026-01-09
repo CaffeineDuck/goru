@@ -1,5 +1,3 @@
-// Type definitions for goru host functions
-
 interface FSEntry {
   name: string;
   is_dir: boolean;
@@ -14,7 +12,16 @@ interface FSStatResult {
 }
 
 // =============================================================================
-// kv - Key-Value Store Module
+// Core
+// =============================================================================
+
+declare function call(fn: string, args?: Record<string, unknown>): unknown;
+declare function asyncCall(fn: string, args?: Record<string, unknown>): Promise<unknown>;
+declare function flushAsync(): void;
+declare function runAsync<T>(...promises: Promise<T>[]): Promise<T[]>;
+
+// =============================================================================
+// kv
 // =============================================================================
 
 interface KVModule {
@@ -29,25 +36,41 @@ interface KVModule {
 declare const kv: KVModule;
 
 // =============================================================================
-// http - HTTP Client Module
+// http
 // =============================================================================
+
+interface HTTPRequestOptions {
+  headers?: Record<string, string>;
+  body?: string;
+}
 
 declare class HTTPResponse {
   readonly statusCode: number;
   readonly text: string;
+  readonly headers: Record<string, string>;
   readonly ok: boolean;
   json(): unknown;
 }
 
 interface HTTPModule {
-  get(url: string): HTTPResponse;
-  asyncGet(url: string): Promise<HTTPResponse>;
+  request(method: string, url: string, options?: HTTPRequestOptions): HTTPResponse;
+  get(url: string, options?: HTTPRequestOptions): HTTPResponse;
+  post(url: string, options?: HTTPRequestOptions): HTTPResponse;
+  put(url: string, options?: HTTPRequestOptions): HTTPResponse;
+  patch(url: string, options?: HTTPRequestOptions): HTTPResponse;
+  delete(url: string, options?: HTTPRequestOptions): HTTPResponse;
+  asyncRequest(method: string, url: string, options?: HTTPRequestOptions): Promise<HTTPResponse>;
+  asyncGet(url: string, options?: HTTPRequestOptions): Promise<HTTPResponse>;
+  asyncPost(url: string, options?: HTTPRequestOptions): Promise<HTTPResponse>;
+  asyncPut(url: string, options?: HTTPRequestOptions): Promise<HTTPResponse>;
+  asyncPatch(url: string, options?: HTTPRequestOptions): Promise<HTTPResponse>;
+  asyncDelete(url: string, options?: HTTPRequestOptions): Promise<HTTPResponse>;
 }
 
 declare const http: HTTPModule;
 
 // =============================================================================
-// fs - Filesystem Module
+// fs
 // =============================================================================
 
 interface FSModule {
@@ -73,21 +96,7 @@ interface FSModule {
 declare const fs: FSModule;
 
 // =============================================================================
-// Time
+// time
 // =============================================================================
 
 declare function time_now(): number;
-
-// =============================================================================
-// Async Utilities
-// =============================================================================
-
-declare function flushAsync(): void;
-declare function runAsync<T>(...promises: Promise<T>[]): Promise<T[]>;
-
-// =============================================================================
-// Low-level Protocol (for custom host functions)
-// =============================================================================
-
-declare function _goru_call(fn: string, args: Record<string, unknown>): unknown;
-declare function _asyncCall(fn: string, args: Record<string, unknown>): Promise<unknown>;

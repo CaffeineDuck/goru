@@ -36,7 +36,7 @@ await kv.asyncDelete("key");
 
 ### http - HTTP Client
 
-Requires `WithAllowedHosts`. GET requests only.
+Requires `WithAllowedHosts`. Supports all HTTP methods with headers and body.
 
 **Go:**
 ```go
@@ -45,26 +45,56 @@ exec.Run(ctx, lang, code, executor.WithAllowedHosts([]string{"api.example.com"})
 
 **Python:**
 ```python
+# GET
 resp = http.get("https://api.example.com/data")
+resp = http.get("https://api.example.com/data", headers={"Authorization": "Bearer token"})
+
+# POST, PUT, PATCH, DELETE
+resp = http.post("https://api.example.com/data", body='{"key": "value"}', headers={"Content-Type": "application/json"})
+resp = http.put("https://api.example.com/data/1", body='{"key": "updated"}')
+resp = http.patch("https://api.example.com/data/1", body='{"key": "patched"}')
+resp = http.delete("https://api.example.com/data/1")
+
+# Generic request
+resp = http.request("OPTIONS", "https://api.example.com/data")
+
+# Response
 resp.ok           # True if 2xx
 resp.status_code  # 200
 resp.text         # response body string
+resp.headers      # response headers dict
 resp.json()       # parse JSON
 
 # Async
 resp = await http.async_get("https://api.example.com/data")
+resp = await http.async_post("https://api.example.com/data", body='{}')
 ```
 
 **JavaScript:**
 ```javascript
+// GET
 const resp = http.get("https://api.example.com/data");
+const resp = http.get("https://api.example.com/data", {headers: {"Authorization": "Bearer token"}});
+
+// POST, PUT, PATCH, DELETE
+const resp = http.post("https://api.example.com/data", {body: '{"key": "value"}', headers: {"Content-Type": "application/json"}});
+const resp = http.put("https://api.example.com/data/1", {body: '{"key": "updated"}'});
+const resp = http.patch("https://api.example.com/data/1", {body: '{"key": "patched"}'});
+const resp = http.delete("https://api.example.com/data/1");
+
+// Generic request
+const resp = http.request("OPTIONS", "https://api.example.com/data");
+
+// Response
 resp.ok          // true if 2xx
 resp.statusCode  // 200
 resp.text        // response body string
+resp.headers     // response headers object
 resp.json()      // parse JSON
 
 // Async
 const resp = await http.asyncGet("https://api.example.com/data");
+const resp = await http.asyncPost("https://api.example.com/data", {body: '{}'});
 ```
 
 Host matching: exact match or subdomain (e.g., `api.example.com` allows `sub.api.example.com`).
@@ -201,24 +231,24 @@ registry.Register("get_user", func(ctx context.Context, args map[string]any) (an
 exec, _ := executor.New(registry)
 ```
 
-Call from sandboxed code using the low-level protocol:
+Call from sandboxed code:
 
 **Python:**
 ```python
-user = _goru_call("get_user", {"id": "123"})
+user = call("get_user", id="123")
 print(user["name"])  # Alice
 
 # Async
-user = await _async_call("get_user", {"id": "123"})
+user = await async_call("get_user", id="123")
 ```
 
 **JavaScript:**
 ```javascript
-const user = _goru_call("get_user", {id: "123"});
+const user = call("get_user", {id: "123"});
 console.log(user.name);  // Alice
 
 // Async
-const user = await _asyncCall("get_user", {id: "123"});
+const user = await asyncCall("get_user", {id: "123"});
 ```
 
 ## Type Stubs

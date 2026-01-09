@@ -64,7 +64,13 @@ func New(registry *hostfunc.Registry, opts ...ExecutorOption) (*Executor, error)
 	}
 
 	rt := wazero.NewRuntimeWithConfig(ctx, rtConfig)
-	wasi_snapshot_preview1.MustInstantiate(ctx, rt)
+	if _, err := wasi_snapshot_preview1.Instantiate(ctx, rt); err != nil {
+		if cache != nil {
+			cache.Close(ctx)
+		}
+		rt.Close(ctx)
+		return nil, fmt.Errorf("instantiate WASI: %w", err)
+	}
 
 	e := &Executor{
 		runtime:  rt,
@@ -73,7 +79,6 @@ func New(registry *hostfunc.Registry, opts ...ExecutorOption) (*Executor, error)
 		registry: registry,
 	}
 
-	// Precompile requested languages
 	for _, lang := range cfg.precompile {
 		if _, err := e.getCompiled(ctx, lang); err != nil {
 			e.Close()
@@ -104,18 +109,15 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		return Result{Error: err, Duration: time.Since(start)}
 	}
 
-	// Set up registry with built-in functions
 	registry := e.registry
 	if registry == nil {
 		registry = hostfunc.NewRegistry()
 	}
 
-	// Add time function (always available)
 	registry.Register("time_now", func(ctx context.Context, args map[string]any) (any, error) {
 		return float64(time.Now().UnixNano()) / 1e9, nil
 	})
 
-	// Add KV store (per-run or shared)
 	kv := cfg.kvStore
 	if kv == nil {
 		kv = hostfunc.NewKVStore(cfg.kvOptions...)
@@ -124,17 +126,22 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 	registry.Register("kv_set", kv.Set)
 	registry.Register("kv_delete", kv.Delete)
 
-	// Add HTTP if hosts allowed
 	if len(cfg.allowedHosts) > 0 {
-		httpCfg := hostfunc.HTTPConfig{
-			AllowedHosts: cfg.allowedHosts,
-			MaxURLLength: cfg.httpMaxURLLength,
-			MaxBodySize:  cfg.httpMaxBodySize,
-		}
-		registry.Register("http_get", hostfunc.NewHTTPGet(httpCfg))
+		httpHandler := hostfunc.NewHTTP(hostfunc.HTTPConfig{
+			AllowedHosts:   cfg.allowedHosts,
+			MaxURLLength:   cfg.httpMaxURLLength,
+			MaxBodySize:    cfg.httpMaxBodySize,
+			RequestTimeout: cfg.httpTimeout,
+		})
+		registry.Register("http_request", httpHandler.Request)
+		registry.Register("http_get", hostfunc.NewHTTPGet(hostfunc.HTTPConfig{
+			AllowedHosts:   cfg.allowedHosts,
+			MaxURLLength:   cfg.httpMaxURLLength,
+			MaxBodySize:    cfg.httpMaxBodySize,
+			RequestTimeout: cfg.httpTimeout,
+		}))
 	}
 
-	// Add filesystem if mounts configured
 	if len(cfg.mounts) > 0 {
 		fs := hostfunc.NewFS(cfg.mounts, cfg.fsOptions...)
 		registry.Register("fs_read", fs.Read)
@@ -146,7 +153,6 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		registry.Register("fs_stat", fs.Stat)
 	}
 
-	// Set up I/O
 	var stdout bytes.Buffer
 	stdinReader, stdinWriter := io.Pipe()
 	protocol := newProtocolHandler(ctx, registry, stdinWriter)
@@ -200,7 +206,6 @@ func (e *Executor) getCompiled(ctx context.Context, lang Language) (wazero.Compi
 	e.mu.Lock()
 	defer e.mu.Unlock()
 
-	// Double-check after acquiring write lock
 	if compiled, ok := e.compiled[name]; ok {
 		return compiled, nil
 	}

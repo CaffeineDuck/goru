@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -349,5 +350,85 @@ func TestExecutorMemoryLimit(t *testing.T) {
 		t.Log("Note: Python managed to run with 1MB limit (unexpected but OK)")
 	} else {
 		t.Logf("Memory limit enforced: %v", result.Error)
+	}
+}
+
+// =============================================================================
+// CONCURRENT EXECUTION TESTS
+// =============================================================================
+
+func TestConcurrentRuns(t *testing.T) {
+	const numGoroutines = 20
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	errors := make(chan error, numGoroutines)
+
+	for i := range numGoroutines {
+		go func(id int) {
+			defer wg.Done()
+			result := sharedExec.Run(context.Background(), sharedLang, `print(sum(range(100)))`)
+			if result.Error != nil {
+				errors <- result.Error
+				return
+			}
+			if strings.TrimSpace(result.Output) != "4950" {
+				errors <- result.Error
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			t.Errorf("concurrent run failed: %v", err)
+		}
+	}
+}
+
+func TestConcurrentRunsWithSharedKV(t *testing.T) {
+	kv := hostfunc.NewKVStore()
+	const numGoroutines = 10
+	var wg sync.WaitGroup
+	wg.Add(numGoroutines)
+
+	errors := make(chan error, numGoroutines)
+
+	for i := range numGoroutines {
+		go func(id int) {
+			defer wg.Done()
+			code := `
+kv.set("counter_` + string(rune('a'+id)) + `", "done")
+print("ok")
+`
+			result := sharedExec.Run(context.Background(), sharedLang, code, executor.WithKVStore(kv))
+			if result.Error != nil {
+				errors <- result.Error
+				return
+			}
+			if strings.TrimSpace(result.Output) != "ok" {
+				errors <- result.Error
+			}
+		}(i)
+	}
+
+	wg.Wait()
+	close(errors)
+
+	for err := range errors {
+		if err != nil {
+			t.Errorf("concurrent run with shared KV failed: %v", err)
+		}
+	}
+
+	// Verify all writes succeeded
+	for i := range numGoroutines {
+		key := "counter_" + string(rune('a'+i))
+		val, _ := kv.Get(context.Background(), map[string]any{"key": key})
+		if val != "done" {
+			t.Errorf("expected kv[%s]='done', got %v", key, val)
+		}
 	}
 }

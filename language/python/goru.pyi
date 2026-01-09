@@ -1,19 +1,26 @@
-from typing import Any, TypedDict, Coroutine
-from asyncio import AbstractEventLoop
+from typing import Any, Coroutine
 
-class FSEntry(TypedDict):
+class FSEntry:
     name: str
     is_dir: bool
     size: int
 
-class FSStatResult(TypedDict):
+class FSStatResult:
     name: str
     size: int
     is_dir: bool
     mod_time: int
 
 # =============================================================================
-# kv - Key-Value Store Module
+# Core
+# =============================================================================
+
+def call(fn: str, **kwargs: Any) -> Any: ...
+async def async_call(fn: str, **kwargs: Any) -> Any: ...
+def run_async[T](coro: Coroutine[Any, Any, T]) -> T: ...
+
+# =============================================================================
+# kv
 # =============================================================================
 
 class _KVModule:
@@ -27,24 +34,35 @@ class _KVModule:
 kv: _KVModule
 
 # =============================================================================
-# http - HTTP Client Module
+# http
 # =============================================================================
 
-class _HTTPResponse:
+class HTTPResponse:
     status_code: int
     text: str
+    headers: dict[str, str]
     @property
     def ok(self) -> bool: ...
     def json(self) -> Any: ...
 
 class _HTTPModule:
-    def get(self, url: str) -> _HTTPResponse: ...
-    async def async_get(self, url: str) -> _HTTPResponse: ...
+    def request(self, method: str, url: str, *, headers: dict[str, str] | None = None, body: str | None = None) -> HTTPResponse: ...
+    def get(self, url: str, *, headers: dict[str, str] | None = None) -> HTTPResponse: ...
+    def post(self, url: str, *, headers: dict[str, str] | None = None, body: str | None = None) -> HTTPResponse: ...
+    def put(self, url: str, *, headers: dict[str, str] | None = None, body: str | None = None) -> HTTPResponse: ...
+    def patch(self, url: str, *, headers: dict[str, str] | None = None, body: str | None = None) -> HTTPResponse: ...
+    def delete(self, url: str, *, headers: dict[str, str] | None = None) -> HTTPResponse: ...
+    async def async_request(self, method: str, url: str, *, headers: dict[str, str] | None = None, body: str | None = None) -> HTTPResponse: ...
+    async def async_get(self, url: str, *, headers: dict[str, str] | None = None) -> HTTPResponse: ...
+    async def async_post(self, url: str, *, headers: dict[str, str] | None = None, body: str | None = None) -> HTTPResponse: ...
+    async def async_put(self, url: str, *, headers: dict[str, str] | None = None, body: str | None = None) -> HTTPResponse: ...
+    async def async_patch(self, url: str, *, headers: dict[str, str] | None = None, body: str | None = None) -> HTTPResponse: ...
+    async def async_delete(self, url: str, *, headers: dict[str, str] | None = None) -> HTTPResponse: ...
 
 http: _HTTPModule
 
 # =============================================================================
-# fs - Filesystem Module
+# fs
 # =============================================================================
 
 class _FSModule:
@@ -69,20 +87,7 @@ class _FSModule:
 fs: _FSModule
 
 # =============================================================================
-# Time
+# time
 # =============================================================================
 
 def time_now() -> float: ...
-
-# =============================================================================
-# Async Utilities
-# =============================================================================
-
-def run_async[T](coro: Coroutine[Any, Any, T]) -> T: ...
-
-# =============================================================================
-# Low-level Protocol (for custom host functions)
-# =============================================================================
-
-def _goru_call(fn: str, args: dict[str, Any]) -> Any: ...
-def _async_call(fn: str, args: dict[str, Any]) -> Coroutine[Any, Any, Any]: ...

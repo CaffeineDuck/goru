@@ -100,21 +100,20 @@ func TestHTTPGetURLTooLong(t *testing.T) {
 	if err == nil {
 		t.Error("expected long URL to be rejected")
 	}
-	if err.Error() != "url too long" {
-		t.Errorf("expected 'url too long' error, got %v", err)
+	if err.Error() != "url exceeds max length" {
+		t.Errorf("expected 'url exceeds max length' error, got %v", err)
 	}
 }
 
 func TestHTTPGetDefaultMaxURLLength(t *testing.T) {
 	fn := NewHTTPGet(HTTPConfig{AllowedHosts: []string{"example.com"}})
 
-	// Default is 8KB, try a 10KB URL
 	longURL := "https://example.com/" + string(make([]byte, 10*1024))
 	_, err := fn(context.Background(), map[string]any{"url": longURL})
 	if err == nil {
 		t.Error("expected long URL to be rejected by default")
 	}
-	if err.Error() != "url too long" {
-		t.Errorf("expected 'url too long' error, got %v", err)
+	if err.Error() != "url exceeds max length" {
+		t.Errorf("expected 'url exceeds max length' error, got %v", err)
 	}
 }

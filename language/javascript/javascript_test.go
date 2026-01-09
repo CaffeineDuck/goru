@@ -56,8 +56,8 @@ func TestJavaScriptKVHostFunction(t *testing.T) {
 	defer exec.Close()
 
 	result := exec.Run(context.Background(), New(), `
-kv_set("key", "value");
-console.log(kv_get("key"));
+kv.set("key", "value");
+console.log(kv.get("key"));
 `)
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
@@ -77,9 +77,9 @@ func TestJavaScriptMultipleHostCalls(t *testing.T) {
 
 	result := exec.Run(context.Background(), New(), `
 for (let i = 0; i < 3; i++) {
-    kv_set("k" + i, "v" + i);
+    kv.set("k" + i, "v" + i);
 }
-const values = [0,1,2].map(i => kv_get("k" + i)).join(",");
+const values = [0,1,2].map(i => kv.get("k" + i)).join(",");
 console.log(values);
 `)
 	if result.Error != nil {

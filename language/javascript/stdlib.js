@@ -1,7 +1,5 @@
-// goru host function bindings for JavaScript
-
 // =============================================================================
-// Internal: Synchronous Host Function Protocol
+// Core: Host Function Protocol
 // =============================================================================
 
 const _goru_call = (fn, args) => {
@@ -13,10 +11,6 @@ const _goru_call = (fn, args) => {
   }
   return resp.data;
 };
-
-// =============================================================================
-// Internal: Async Support - Batched host calls with Promises
-// =============================================================================
 
 const _asyncBatch = {
   pending: new Map(),
@@ -62,8 +56,11 @@ const runAsync = async (...promises) => {
   return Promise.all(promises);
 };
 
+const call = (fn, args) => _goru_call(fn, args || {});
+const asyncCall = (fn, args) => _asyncCall(fn, args || {});
+
 // =============================================================================
-// kv - Key-Value Store Module
+// kv - Key-Value Store
 // =============================================================================
 
 const kv = {
@@ -95,7 +92,7 @@ const kv = {
 };
 
 // =============================================================================
-// http - HTTP Client Module
+// http - HTTP Client
 // =============================================================================
 
 class HTTPResponse {
@@ -103,6 +100,7 @@ class HTTPResponse {
     this._data = data;
     this.statusCode = data.status || 0;
     this.text = data.body || "";
+    this.headers = data.headers || {};
   }
 
   get ok() {
@@ -115,19 +113,65 @@ class HTTPResponse {
 }
 
 const http = {
-  get(url) {
-    const data = _goru_call("http_get", {url});
+  request(method, url, options = {}) {
+    const args = {method, url};
+    if (options.headers) args.headers = options.headers;
+    if (options.body) args.body = options.body;
+    const data = _goru_call("http_request", args);
     return new HTTPResponse(data);
   },
 
-  async asyncGet(url) {
-    const data = await _asyncCall("http_get", {url});
+  get(url, options = {}) {
+    return this.request("GET", url, options);
+  },
+
+  post(url, options = {}) {
+    return this.request("POST", url, options);
+  },
+
+  put(url, options = {}) {
+    return this.request("PUT", url, options);
+  },
+
+  patch(url, options = {}) {
+    return this.request("PATCH", url, options);
+  },
+
+  delete(url, options = {}) {
+    return this.request("DELETE", url, options);
+  },
+
+  async asyncRequest(method, url, options = {}) {
+    const args = {method, url};
+    if (options.headers) args.headers = options.headers;
+    if (options.body) args.body = options.body;
+    const data = await _asyncCall("http_request", args);
     return new HTTPResponse(data);
+  },
+
+  async asyncGet(url, options = {}) {
+    return await this.asyncRequest("GET", url, options);
+  },
+
+  async asyncPost(url, options = {}) {
+    return await this.asyncRequest("POST", url, options);
+  },
+
+  async asyncPut(url, options = {}) {
+    return await this.asyncRequest("PUT", url, options);
+  },
+
+  async asyncPatch(url, options = {}) {
+    return await this.asyncRequest("PATCH", url, options);
+  },
+
+  async asyncDelete(url, options = {}) {
+    return await this.asyncRequest("DELETE", url, options);
   }
 };
 
 // =============================================================================
-// fs - Filesystem Module
+// fs - Filesystem
 // =============================================================================
 
 const fs = {
@@ -168,7 +212,6 @@ const fs = {
     return _goru_call("fs_stat", {path});
   },
 
-  // Async versions
   async asyncReadText(path) {
     return await _asyncCall("fs_read", {path});
   },
@@ -204,8 +247,7 @@ const fs = {
 };
 
 // =============================================================================
-// Time
+// time
 // =============================================================================
 
 const time_now = () => _goru_call("time_now", {});
-

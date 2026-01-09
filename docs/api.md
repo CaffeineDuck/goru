@@ -35,7 +35,8 @@ result := exec.Run(ctx, language, code, opts...)
 | Option | Description |
 |--------|-------------|
 | `WithTimeout(dur)` | Execution timeout (default 30s) |
-| `WithAllowedHosts([]string)` | Hosts for `http.get` |
+| `WithAllowedHosts([]string)` | Hosts for HTTP requests |
+| `WithHTTPTimeout(dur)` | HTTP request timeout |
 | `WithKVStore(*KVStore)` | Share KV across runs |
 | `WithMount(virtual, host, mode)` | Mount filesystem |
 

@@ -10,14 +10,14 @@ import (
 type Option func(*runConfig)
 
 type runConfig struct {
-	timeout      time.Duration
-	allowedHosts []string
-	kvStore      *hostfunc.KVStore
-	mounts       []hostfunc.Mount
-	// Security limits
+	timeout          time.Duration
+	allowedHosts     []string
+	kvStore          *hostfunc.KVStore
+	mounts           []hostfunc.Mount
 	kvOptions        []hostfunc.KVOption
 	httpMaxURLLength int
 	httpMaxBodySize  int64
+	httpTimeout      time.Duration
 	fsOptions        []hostfunc.FSOption
 }
 
@@ -110,6 +110,13 @@ func WithHTTPMaxBodySize(size int64) Option {
 	}
 }
 
+// WithHTTPTimeout sets the timeout for individual HTTP requests.
+func WithHTTPTimeout(d time.Duration) Option {
+	return func(c *runConfig) {
+		c.httpTimeout = d
+	}
+}
+
 // WithFSMaxFileSize sets the maximum file size for read operations.
 func WithFSMaxFileSize(size int64) Option {
 	return func(c *runConfig) {
@@ -144,7 +151,7 @@ type executorConfig struct {
 func defaultExecutorConfig() executorConfig {
 	return executorConfig{
 		diskCache:        false,
-		memoryLimitPages: 0, // 0 means use wazero default (65536 pages = 4GB)
+		memoryLimitPages: MemoryLimit256MB,
 	}
 }
 
@@ -173,13 +180,7 @@ func WithPrecompile(langs ...Language) ExecutorOption {
 }
 
 // WithMemoryLimit sets the maximum memory available to WASM modules.
-// Each page is 64KB. Examples:
-//   - WithMemoryLimit(16) = 1MB max
-//   - WithMemoryLimit(256) = 16MB max
-//   - WithMemoryLimit(1024) = 64MB max
-//   - WithMemoryLimit(4096) = 256MB max
-//
-// Default is 0 (no limit, up to 4GB).
+// Each page is 64KB. Default is 256MB.
 func WithMemoryLimit(pages uint32) ExecutorOption {
 	return func(c *executorConfig) {
 		c.memoryLimitPages = pages

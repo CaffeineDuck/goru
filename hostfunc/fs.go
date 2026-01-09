@@ -3,6 +3,7 @@ package hostfunc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -23,9 +24,9 @@ const (
 )
 
 const (
-	DefaultMaxFileSize = 10 * 1024 * 1024 // 10MB max file read
-	DefaultMaxWriteSize = 10 * 1024 * 1024 // 10MB max file write
-	DefaultMaxPathLength = 4096            // 4KB max path
+	DefaultMaxFileSize   = 10 * 1024 * 1024 // 10MB max file read
+	DefaultMaxWriteSize  = 10 * 1024 * 1024 // 10MB max file write
+	DefaultMaxPathLength = 4096             // 4KB max path
 )
 
 // Mount represents a virtual path mapped to a host path with specific permissions.
@@ -93,10 +94,37 @@ func NewFS(mounts []Mount, opts ...FSOption) *FS {
 	return f
 }
 
+// normalizePath converts a virtual path to a clean, absolute form.
+func normalizePath(virtualPath string) string {
+	return filepath.Clean("/" + strings.TrimPrefix(virtualPath, "/"))
+}
+
+// checkSymlinkEscape verifies a path doesn't escape the mount via symlinks.
+// Returns the resolved real path if valid.
+func checkSymlinkEscape(absPath, mountBase string) (string, error) {
+	realPath, err := filepath.EvalSymlinks(absPath)
+	if err == nil {
+		if !strings.HasPrefix(realPath, mountBase) {
+			return "", errors.New("permission denied: symlink escape attempt")
+		}
+		return realPath, nil
+	}
+	if !os.IsNotExist(err) {
+		return "", errors.New("invalid path")
+	}
+
+	// Path doesn't exist, check parent for symlink escape
+	parentPath := filepath.Dir(absPath)
+	if realParent, err := filepath.EvalSymlinks(parentPath); err == nil {
+		if !strings.HasPrefix(realParent, mountBase) {
+			return "", errors.New("permission denied: symlink escape attempt")
+		}
+	}
+	return absPath, nil
+}
+
 // resolve maps a virtual path to a host path, checking permissions.
-// Returns the host path and whether write access is allowed.
 func (f *FS) resolve(virtualPath string, needWrite bool) (string, error) {
-	// Check path length first
 	if len(virtualPath) > f.maxPathLen {
 		return "", errors.New("path too long")
 	}
@@ -104,59 +132,32 @@ func (f *FS) resolve(virtualPath string, needWrite bool) (string, error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	// Normalize the virtual path
-	vp := filepath.Clean("/" + strings.TrimPrefix(virtualPath, "/"))
+	vp := normalizePath(virtualPath)
 
-	// Find matching mount
 	for _, m := range f.mounts {
-		if vp == m.VirtualPath || strings.HasPrefix(vp, m.VirtualPath+"/") {
-			// Check permissions
-			if needWrite && m.Mode == MountReadOnly {
-				return "", errors.New("permission denied: read-only mount")
-			}
-
-			// Calculate relative path within mount
-			relPath := strings.TrimPrefix(vp, m.VirtualPath)
-			if relPath == "" {
-				relPath = "/"
-			}
-
-			// Join with host path
-			hostPath := filepath.Join(m.HostPath, relPath)
-
-			// Security: ensure we haven't escaped the mount via ..
-			absHostPath, err := filepath.Abs(hostPath)
-			if err != nil {
-				return "", errors.New("invalid path")
-			}
-
-			// Check that resolved path is still under mount's host path
-			if !strings.HasPrefix(absHostPath, m.HostPath) {
-				return "", errors.New("permission denied: path escape attempt")
-			}
-
-			// Security: resolve symlinks and check again
-			// Only check if path exists (for reads) or parent exists (for writes)
-			if realPath, err := filepath.EvalSymlinks(absHostPath); err == nil {
-				if !strings.HasPrefix(realPath, m.HostPath) {
-					return "", errors.New("permission denied: symlink escape attempt")
-				}
-				return realPath, nil
-			} else if !os.IsNotExist(err) {
-				// For non-existence errors (other than file not found), fail
-				return "", errors.New("invalid path")
-			}
-
-			// Path doesn't exist yet (valid for writes), check parent
-			parentPath := filepath.Dir(absHostPath)
-			if realParent, err := filepath.EvalSymlinks(parentPath); err == nil {
-				if !strings.HasPrefix(realParent, m.HostPath) {
-					return "", errors.New("permission denied: symlink escape attempt")
-				}
-			}
-
-			return absHostPath, nil
+		if vp != m.VirtualPath && !strings.HasPrefix(vp, m.VirtualPath+"/") {
+			continue
 		}
+
+		if needWrite && m.Mode == MountReadOnly {
+			return "", errors.New("permission denied: read-only mount")
+		}
+
+		relPath := strings.TrimPrefix(vp, m.VirtualPath)
+		if relPath == "" {
+			relPath = "/"
+		}
+
+		absHostPath, err := filepath.Abs(filepath.Join(m.HostPath, relPath))
+		if err != nil {
+			return "", errors.New("invalid path")
+		}
+
+		if !strings.HasPrefix(absHostPath, m.HostPath) {
+			return "", errors.New("permission denied: path escape attempt")
+		}
+
+		return checkSymlinkEscape(absHostPath, m.HostPath)
 	}
 
 	return "", errors.New("permission denied: path not in any mount")
@@ -178,12 +179,12 @@ func (f *FS) Read(ctx context.Context, args map[string]any) (any, error) {
 	info, err := os.Stat(hostPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.New("file not found: " + path)
+			return nil, fmt.Errorf("file not found: %s", path)
 		}
-		return nil, errors.New("stat error: " + err.Error())
+		return nil, fmt.Errorf("stat: %w", err)
 	}
 	if info.IsDir() {
-		return nil, errors.New("cannot read directory: " + path)
+		return nil, fmt.Errorf("cannot read directory: %s", path)
 	}
 	if info.Size() > f.maxFileSize {
 		return nil, errors.New("file too large")
@@ -191,7 +192,7 @@ func (f *FS) Read(ctx context.Context, args map[string]any) (any, error) {
 
 	data, err := os.ReadFile(hostPath)
 	if err != nil {
-		return nil, errors.New("read error: " + err.Error())
+		return nil, fmt.Errorf("read: %w", err)
 	}
 
 	return string(data), nil
@@ -226,7 +227,7 @@ func (f *FS) Write(ctx context.Context, args map[string]any) (any, error) {
 	}
 
 	if err := os.WriteFile(hostPath, []byte(content), 0644); err != nil {
-		return nil, errors.New("write error: " + err.Error())
+		return nil, fmt.Errorf("write: %w", err)
 	}
 
 	return "ok", nil
@@ -247,9 +248,9 @@ func (f *FS) List(ctx context.Context, args map[string]any) (any, error) {
 	entries, err := os.ReadDir(hostPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.New("directory not found: " + path)
+			return nil, fmt.Errorf("directory not found: %s", path)
 		}
-		return nil, errors.New("list error: " + err.Error())
+		return nil, fmt.Errorf("listdir: %w", err)
 	}
 
 	result := make([]map[string]any, 0, len(entries))
@@ -304,7 +305,7 @@ func (f *FS) Mkdir(ctx context.Context, args map[string]any) (any, error) {
 	}
 
 	if err := os.MkdirAll(hostPath, 0755); err != nil {
-		return nil, errors.New("mkdir error: " + err.Error())
+		return nil, fmt.Errorf("mkdir: %w", err)
 	}
 
 	return "ok", nil
@@ -330,12 +331,12 @@ func (f *FS) Remove(ctx context.Context, args map[string]any) (any, error) {
 
 	if err := os.Remove(hostPath); err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.New("file not found: " + path)
+			return nil, fmt.Errorf("file not found: %s", path)
 		}
 		if pathErr, ok := err.(*fs.PathError); ok && strings.Contains(pathErr.Error(), "directory not empty") {
-			return nil, errors.New("directory not empty: " + path)
+			return nil, fmt.Errorf("directory not empty: %s", path)
 		}
-		return nil, errors.New("remove error: " + err.Error())
+		return nil, fmt.Errorf("remove: %w", err)
 	}
 
 	return "ok", nil
@@ -356,9 +357,9 @@ func (f *FS) Stat(ctx context.Context, args map[string]any) (any, error) {
 	info, err := os.Stat(hostPath)
 	if err != nil {
 		if os.IsNotExist(err) {
-			return nil, errors.New("file not found: " + path)
+			return nil, fmt.Errorf("file not found: %s", path)
 		}
-		return nil, errors.New("stat error: " + err.Error())
+		return nil, fmt.Errorf("stat: %w", err)
 	}
 
 	return map[string]any{
@@ -374,8 +375,7 @@ func (f *FS) findMount(virtualPath string) *Mount {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
-	vp := filepath.Clean("/" + strings.TrimPrefix(virtualPath, "/"))
-
+	vp := normalizePath(virtualPath)
 	for i := range f.mounts {
 		m := &f.mounts[i]
 		if vp == m.VirtualPath || strings.HasPrefix(vp, m.VirtualPath+"/") {
