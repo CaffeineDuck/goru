@@ -1,3 +1,5 @@
+github.com/paralin/go-quickjs-wasi v0.11.0 h1:6zk0PAucgyhMe0QlaKI4jtHfzIMc7QKWNgrA/qAf5sc=
+github.com/paralin/go-quickjs-wasi v0.11.0/go.mod h1:xCQtRFXtSfOH63fUqZNtIZRBsYFcpo09xb1vLBD9VgU=
 github.com/tetratelabs/wazero v1.11.0 h1:+gKemEuKCTevU4d7ZTzlsvgd1uaToIDtlQlmNbwqYhA=
 github.com/tetratelabs/wazero v1.11.0/go.mod h1:eV28rsN8Q+xwjogd7f4/Pp4xFxO7uOGbLcD/LzB1wiU=
 golang.org/x/sys v0.38.0 h1:3yZWxaJjBmCWXqhN1qh02AkOnCQ1poK6oF+a7xWL6Gc=

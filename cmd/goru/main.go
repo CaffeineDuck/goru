@@ -8,24 +8,27 @@ import (
 	"io"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/caffeineduck/goru/executor"
 	"github.com/caffeineduck/goru/hostfunc"
+	"github.com/caffeineduck/goru/language/javascript"
 	"github.com/caffeineduck/goru/language/python"
 )
 
-const usage = `goru - WASM Python sandbox
+const usage = `goru - WASM code sandbox
 
 Usage:
-  goru [options] [file.py]       Run Python code (default command)
-  goru run [options] [file.py]   Run Python code
+  goru [options] [file]          Run code (language auto-detected from extension)
+  goru run [options] [file]      Run code
   goru serve [options]           Start HTTP server
 
 Run Options:
-  -c string         Python code to execute
+  -c string         Code to execute
+  -lang string      Language: python, js (default: auto-detect)
   -timeout dur      Execution timeout (default 30s)
   -allow-host host  Allow HTTP to host (repeatable)
   -mount spec       Mount filesystem (virtual:host:mode, repeatable)
@@ -33,11 +36,16 @@ Run Options:
 
 Serve Options:
   -port int         Port to listen on (default 8080)
+  -lang string      Default language: python, js (default: python)
   -timeout dur      Default execution timeout (default 30s)
   -session-ttl dur  Session expiry time (default 1h)
   -allow-host host  Allow HTTP to host (repeatable)
   -mount spec       Mount filesystem (virtual:host:mode, repeatable)
   -no-cache         Disable compilation cache
+
+Languages:
+  python, py   Python 3.12 (CPython WASM, ~1.5s cold / ~120ms warm)
+  js           JavaScript ES2023 (QuickJS WASM, ~200ms)
 
 Mount Modes:
   ro   Read-only
@@ -47,10 +55,10 @@ Mount Modes:
 Examples:
   goru -c 'print(1+1)'
   goru script.py
+  goru -lang js -c 'console.log(1+1)'
+  goru script.js
   goru -timeout 5s -c 'while True: pass'
-  goru -allow-host httpbin.org -c 'print(http_get("https://httpbin.org/get"))'
-  goru -mount /data:./input:ro -c 'print(fs_read("/data/config.json"))'
-  goru serve -port 8080 -allow-host api.example.com
+  goru serve -port 8080 -lang js
 `
 
 func main() {
@@ -106,6 +114,32 @@ func parseMount(spec string) (hostfunc.Mount, error) {
 	}, nil
 }
 
+func getLanguage(langFlag string, filename string) executor.Language {
+	lang := langFlag
+
+	// Auto-detect from file extension if not specified
+	if lang == "" && filename != "" {
+		switch strings.ToLower(filepath.Ext(filename)) {
+		case ".py":
+			lang = "python"
+		case ".js", ".mjs":
+			lang = "js"
+		}
+	}
+
+	// Default to python
+	if lang == "" {
+		lang = "python"
+	}
+
+	switch lang {
+	case "js", "javascript":
+		return javascript.New()
+	default:
+		return python.New()
+	}
+}
+
 // --- Run Command ---
 
 func runCmd(args []string) {
@@ -113,7 +147,8 @@ func runCmd(args []string) {
 	fs.Usage = func() { fmt.Print(usage) }
 
 	var (
-		code         = fs.String("c", "", "Python code to execute")
+		code         = fs.String("c", "", "Code to execute")
+		lang         = fs.String("lang", "", "Language: python, js (default: auto-detect)")
 		timeout      = fs.Duration("timeout", 30*time.Second, "Execution timeout")
 		noCache      = fs.Bool("no-cache", false, "Disable compilation cache")
 		allowedHosts stringSlice
@@ -124,11 +159,13 @@ func runCmd(args []string) {
 	fs.Parse(args)
 
 	var source string
+	var filename string
 	switch {
 	case *code != "":
 		source = *code
 	case fs.NArg() > 0:
-		data, err := os.ReadFile(fs.Arg(0))
+		filename = fs.Arg(0)
+		data, err := os.ReadFile(filename)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			os.Exit(1)
@@ -148,6 +185,7 @@ func runCmd(args []string) {
 		os.Exit(1)
 	}
 
+	language := getLanguage(*lang, filename)
 	registry := hostfunc.NewRegistry()
 
 	var execOpts []executor.ExecutorOption
@@ -178,7 +216,7 @@ func runCmd(args []string) {
 		runOpts = append(runOpts, executor.WithMount(m.VirtualPath, m.HostPath, m.Mode))
 	}
 
-	result := exec.Run(context.Background(), python.New(), source, runOpts...)
+	result := exec.Run(context.Background(), language, source, runOpts...)
 	fmt.Print(result.Output)
 
 	if result.Error != nil {
@@ -242,6 +280,7 @@ func (s *sessionStore) cleanup() {
 
 type executeRequest struct {
 	Code      string `json:"code"`
+	Lang      string `json:"lang,omitempty"`
 	SessionID string `json:"session_id,omitempty"`
 	Timeout   string `json:"timeout,omitempty"`
 }
@@ -258,6 +297,7 @@ func serveCmd(args []string) {
 
 	var (
 		port         = fs.Int("port", 8080, "Port to listen on")
+		defaultLang  = fs.String("lang", "python", "Default language: python, js")
 		timeout      = fs.Duration("timeout", 30*time.Second, "Default execution timeout")
 		sessionTTL   = fs.Duration("session-ttl", time.Hour, "Session expiry time")
 		noCache      = fs.Bool("no-cache", false, "Disable compilation cache")
@@ -285,7 +325,8 @@ func serveCmd(args []string) {
 	if !*noCache {
 		execOpts = append(execOpts, executor.WithDiskCache())
 	}
-	execOpts = append(execOpts, executor.WithPrecompile(python.New()))
+	// Precompile the default language
+	execOpts = append(execOpts, executor.WithPrecompile(getLanguage(*defaultLang, "")))
 
 	exec, err := executor.New(registry, execOpts...)
 	if err != nil {
@@ -332,7 +373,14 @@ func serveCmd(args []string) {
 			runOpts = append(runOpts, executor.WithMount(m.VirtualPath, m.HostPath, m.Mode))
 		}
 
-		result := exec.Run(r.Context(), python.New(), req.Code, runOpts...)
+		// Use request language or default
+		reqLang := req.Lang
+		if reqLang == "" {
+			reqLang = *defaultLang
+		}
+		language := getLanguage(reqLang, "")
+
+		result := exec.Run(r.Context(), language, req.Code, runOpts...)
 
 		resp := executeResponse{
 			Output:     result.Output,
