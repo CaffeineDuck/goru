@@ -9,20 +9,32 @@ import (
 	"strings"
 )
 
+const (
+	DefaultMaxURLLength = 8192 // 8KB max URL
+)
+
 type HTTPConfig struct {
 	AllowedHosts []string
 	MaxBodySize  int64
+	MaxURLLength int
 }
 
 func NewHTTPGet(cfg HTTPConfig) Func {
 	if cfg.MaxBodySize == 0 {
 		cfg.MaxBodySize = 1024 * 1024 // 1MB default
 	}
+	if cfg.MaxURLLength == 0 {
+		cfg.MaxURLLength = DefaultMaxURLLength
+	}
 
 	return func(ctx context.Context, args map[string]any) (any, error) {
 		rawURL, ok := args["url"].(string)
 		if !ok {
 			return nil, errors.New("url required")
+		}
+
+		if len(rawURL) > cfg.MaxURLLength {
+			return nil, errors.New("url too long")
 		}
 
 		if len(cfg.AllowedHosts) == 0 {
