@@ -117,9 +117,23 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 	registry.Register("kv_delete", kv.Delete)
 
 	// Add HTTP if hosts allowed
-	registry.Register("http_get", hostfunc.NewHTTPGet(hostfunc.HTTPConfig{
-		AllowedHosts: cfg.allowedHosts,
-	}))
+	if len(cfg.allowedHosts) > 0 {
+		registry.Register("http_get", hostfunc.NewHTTPGet(hostfunc.HTTPConfig{
+			AllowedHosts: cfg.allowedHosts,
+		}))
+	}
+
+	// Add filesystem if mounts configured
+	if len(cfg.mounts) > 0 {
+		fs := hostfunc.NewFS(cfg.mounts...)
+		registry.Register("fs_read", fs.Read)
+		registry.Register("fs_write", fs.Write)
+		registry.Register("fs_list", fs.List)
+		registry.Register("fs_exists", fs.Exists)
+		registry.Register("fs_mkdir", fs.Mkdir)
+		registry.Register("fs_remove", fs.Remove)
+		registry.Register("fs_stat", fs.Stat)
+	}
 
 	// Set up I/O
 	var stdout bytes.Buffer

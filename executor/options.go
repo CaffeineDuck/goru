@@ -13,6 +13,7 @@ type runConfig struct {
 	timeout      time.Duration
 	allowedHosts []string
 	kvStore      *hostfunc.KVStore
+	mounts       []hostfunc.Mount
 }
 
 func defaultRunConfig() runConfig {
@@ -39,6 +40,31 @@ func WithAllowedHosts(hosts []string) Option {
 func WithKVStore(kv *hostfunc.KVStore) Option {
 	return func(c *runConfig) {
 		c.kvStore = kv
+	}
+}
+
+// Mount permission modes (re-exported from hostfunc for convenience).
+const (
+	MountReadOnly        = hostfunc.MountReadOnly
+	MountReadWrite       = hostfunc.MountReadWrite
+	MountReadWriteCreate = hostfunc.MountReadWriteCreate
+)
+
+// WithMount adds a filesystem mount point with the specified permissions.
+// The virtual path is what sandboxed code sees; host path is the actual location.
+//
+// Examples:
+//
+//	executor.WithMount("/data", "./input", executor.MountReadOnly)
+//	executor.WithMount("/output", "./results", executor.MountReadWrite)
+//	executor.WithMount("/workspace", "./work", executor.MountReadWriteCreate)
+func WithMount(virtualPath, hostPath string, mode hostfunc.MountMode) Option {
+	return func(c *runConfig) {
+		c.mounts = append(c.mounts, hostfunc.Mount{
+			VirtualPath: virtualPath,
+			HostPath:    hostPath,
+			Mode:        mode,
+		})
 	}
 }
 

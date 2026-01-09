@@ -105,6 +105,60 @@ print(response["status"])  # 200
 print(response["body"])    # Response body as string
 ```
 
+#### Filesystem (with mount points)
+
+Mount host directories with explicit permissions:
+
+```go
+// Go: Mount directories with specific permissions
+result := exec.Run(ctx, python.New(), code,
+    // Read-only access to input data
+    executor.WithMount("/data", "./input", executor.MountReadOnly),
+    // Read-write access to output (can modify existing files)
+    executor.WithMount("/output", "./results", executor.MountReadWrite),
+    // Full access including creating new files
+    executor.WithMount("/workspace", "./work", executor.MountReadWriteCreate),
+)
+```
+
+```python
+# Python: Access mounted directories
+import json
+
+# Read files (requires MountReadOnly or higher)
+config = json.loads(fs_read("/data/config.json"))
+
+# List directory contents
+for entry in fs_list("/data"):
+    print(f"{entry['name']} - {'dir' if entry['isDir'] else entry['size']} bytes")
+
+# Check if file exists
+if fs_exists("/data/optional.txt"):
+    content = fs_read("/data/optional.txt")
+
+# Write files (requires MountReadWrite or higher)
+fs_write("/output/result.json", json.dumps({"status": "done"}))
+
+# Create directories (requires MountReadWriteCreate)
+fs_mkdir("/workspace/subdir")
+
+# Get file info
+stat = fs_stat("/data/file.txt")
+print(f"Size: {stat['size']}, Modified: {stat['modTime']}")
+
+# Remove files (requires MountReadWrite or higher)
+fs_remove("/workspace/temp.txt")
+```
+
+**Permission levels:**
+| Mode | Read | Write existing | Create new | Delete |
+|------|------|----------------|------------|--------|
+| `MountReadOnly` | ✓ | ✗ | ✗ | ✗ |
+| `MountReadWrite` | ✓ | ✓ | ✗ | ✓ |
+| `MountReadWriteCreate` | ✓ | ✓ | ✓ | ✓ |
+
+**Security:** Path traversal attacks (e.g., `../../../etc/passwd`) are blocked. Paths must stay within their mount point.
+
 ### Custom Host Functions
 
 ```go
@@ -247,8 +301,8 @@ See `language/python/python.go` for a complete example.
 - [x] Compilation caching (in-memory + disk)
 - [x] HTTP host functions
 - [x] Key-value storage
+- [x] Filesystem host functions with mount points
 - [ ] JavaScript support (QuickJS WASM)
-- [ ] Filesystem host functions with mount points
 - [ ] Resource limits (memory, CPU time)
 - [ ] Stdio streaming
 
