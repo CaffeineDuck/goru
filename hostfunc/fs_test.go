@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -13,11 +14,11 @@ func TestFSReadOnly(t *testing.T) {
 	testFile := filepath.Join(dir, "test.txt")
 	os.WriteFile(testFile, []byte("hello world"), 0644)
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/data",
 		HostPath:    dir,
 		Mode:        MountReadOnly,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -42,11 +43,11 @@ func TestFSReadWrite(t *testing.T) {
 	testFile := filepath.Join(dir, "test.txt")
 	os.WriteFile(testFile, []byte("original"), 0644)
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/output",
 		HostPath:    dir,
 		Mode:        MountReadWrite,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -72,11 +73,11 @@ func TestFSReadWrite(t *testing.T) {
 func TestFSReadWriteCreate(t *testing.T) {
 	dir := t.TempDir()
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/workspace",
 		HostPath:    dir,
 		Mode:        MountReadWriteCreate,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -111,11 +112,11 @@ func TestFSList(t *testing.T) {
 	os.WriteFile(filepath.Join(dir, "file2.txt"), []byte("22"), 0644)
 	os.Mkdir(filepath.Join(dir, "subdir"), 0755)
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/data",
 		HostPath:    dir,
 		Mode:        MountReadOnly,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -146,11 +147,11 @@ func TestFSPathTraversalBlocked(t *testing.T) {
 	os.WriteFile(parentFile, []byte("secret"), 0644)
 	defer os.Remove(parentFile)
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/data",
 		HostPath:    dir,
 		Mode:        MountReadOnly,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -164,11 +165,11 @@ func TestFSPathTraversalBlocked(t *testing.T) {
 func TestFSPathNotInMount(t *testing.T) {
 	dir := t.TempDir()
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/data",
 		HostPath:    dir,
 		Mode:        MountReadOnly,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -183,11 +184,11 @@ func TestFSExists(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "exists.txt"), []byte(""), 0644)
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/data",
 		HostPath:    dir,
 		Mode:        MountReadOnly,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -215,11 +216,11 @@ func TestFSRemove(t *testing.T) {
 	testFile := filepath.Join(dir, "delete-me.txt")
 	os.WriteFile(testFile, []byte("bye"), 0644)
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/output",
 		HostPath:    dir,
 		Mode:        MountReadWrite,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -239,11 +240,11 @@ func TestFSStat(t *testing.T) {
 	dir := t.TempDir()
 	os.WriteFile(filepath.Join(dir, "file.txt"), []byte("hello"), 0644)
 
-	fs := NewFS(Mount{
+	fs := NewFS([]Mount{{
 		VirtualPath: "/data",
 		HostPath:    dir,
 		Mode:        MountReadOnly,
-	})
+	}})
 
 	ctx := context.Background()
 
@@ -261,5 +262,105 @@ func TestFSStat(t *testing.T) {
 	}
 	if stat["is_dir"].(bool) != false {
 		t.Error("expected is_dir to be false")
+	}
+}
+
+// Security tests
+
+func TestFSPathTooLong(t *testing.T) {
+	dir := t.TempDir()
+
+	fs := NewFS([]Mount{{
+		VirtualPath: "/data",
+		HostPath:    dir,
+		Mode:        MountReadOnly,
+	}}, WithMaxPathLength(100))
+
+	ctx := context.Background()
+
+	// Create a path longer than the limit
+	longPath := "/data/" + strings.Repeat("a", 200)
+	_, err := fs.Read(ctx, map[string]any{"path": longPath})
+	if err == nil {
+		t.Error("expected long path to be rejected")
+	}
+	if err.Error() != "path too long" {
+		t.Errorf("expected 'path too long' error, got %v", err)
+	}
+}
+
+func TestFSFileTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	largeFile := filepath.Join(dir, "large.txt")
+	// Create a 1KB file
+	os.WriteFile(largeFile, []byte(strings.Repeat("x", 1024)), 0644)
+
+	// Set max file size to 100 bytes
+	fs := NewFS([]Mount{{
+		VirtualPath: "/data",
+		HostPath:    dir,
+		Mode:        MountReadOnly,
+	}}, WithMaxFileSize(100))
+
+	ctx := context.Background()
+
+	_, err := fs.Read(ctx, map[string]any{"path": "/data/large.txt"})
+	if err == nil {
+		t.Error("expected large file read to be rejected")
+	}
+	if err.Error() != "file too large" {
+		t.Errorf("expected 'file too large' error, got %v", err)
+	}
+}
+
+func TestFSWriteTooLarge(t *testing.T) {
+	dir := t.TempDir()
+	testFile := filepath.Join(dir, "test.txt")
+	os.WriteFile(testFile, []byte("original"), 0644)
+
+	// Set max write size to 100 bytes
+	fs := NewFS([]Mount{{
+		VirtualPath: "/data",
+		HostPath:    dir,
+		Mode:        MountReadWrite,
+	}}, WithMaxWriteSize(100))
+
+	ctx := context.Background()
+
+	// Try to write 1KB
+	largeContent := strings.Repeat("x", 1024)
+	_, err := fs.Write(ctx, map[string]any{"path": "/data/test.txt", "content": largeContent})
+	if err == nil {
+		t.Error("expected large write to be rejected")
+	}
+	if err.Error() != "content too large" {
+		t.Errorf("expected 'content too large' error, got %v", err)
+	}
+}
+
+func TestFSSymlinkEscape(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create a file outside the mount
+	outsideDir := t.TempDir()
+	secretFile := filepath.Join(outsideDir, "secret.txt")
+	os.WriteFile(secretFile, []byte("secret data"), 0644)
+
+	// Create a symlink inside the mount pointing outside
+	symlink := filepath.Join(dir, "escape")
+	os.Symlink(outsideDir, symlink)
+
+	fs := NewFS([]Mount{{
+		VirtualPath: "/data",
+		HostPath:    dir,
+		Mode:        MountReadOnly,
+	}})
+
+	ctx := context.Background()
+
+	// Try to read through symlink
+	_, err := fs.Read(ctx, map[string]any{"path": "/data/escape/secret.txt"})
+	if err == nil {
+		t.Error("expected symlink escape to be blocked")
 	}
 }

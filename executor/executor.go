@@ -128,7 +128,7 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 
 	// Add filesystem if mounts configured
 	if len(cfg.mounts) > 0 {
-		fs := hostfunc.NewFS(cfg.mounts...)
+		fs := hostfunc.NewFS(cfg.mounts)
 		registry.Register("fs_read", fs.Read)
 		registry.Register("fs_write", fs.Write)
 		registry.Register("fs_list", fs.List)

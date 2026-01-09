@@ -22,6 +22,12 @@ const (
 	MountReadWriteCreate
 )
 
+const (
+	DefaultMaxFileSize = 10 * 1024 * 1024 // 10MB max file read
+	DefaultMaxWriteSize = 10 * 1024 * 1024 // 10MB max file write
+	DefaultMaxPathLength = 4096            // 4KB max path
+)
+
 // Mount represents a virtual path mapped to a host path with specific permissions.
 type Mount struct {
 	VirtualPath string    // Path as seen by sandboxed code (e.g., "/data")
@@ -31,12 +37,29 @@ type Mount struct {
 
 // FS provides filesystem operations with explicit mount points.
 type FS struct {
-	mounts []Mount
-	mu     sync.RWMutex
+	mounts       []Mount
+	mu           sync.RWMutex
+	maxFileSize  int64
+	maxWriteSize int64
+	maxPathLen   int
+}
+
+type FSOption func(*FS)
+
+func WithMaxFileSize(size int64) FSOption {
+	return func(f *FS) { f.maxFileSize = size }
+}
+
+func WithMaxWriteSize(size int64) FSOption {
+	return func(f *FS) { f.maxWriteSize = size }
+}
+
+func WithMaxPathLength(length int) FSOption {
+	return func(f *FS) { f.maxPathLen = length }
 }
 
 // NewFS creates a new filesystem handler with the given mount points.
-func NewFS(mounts ...Mount) *FS {
+func NewFS(mounts []Mount, opts ...FSOption) *FS {
 	// Normalize and validate mounts
 	normalized := make([]Mount, 0, len(mounts))
 	for _, m := range mounts {
@@ -47,18 +70,37 @@ func NewFS(mounts ...Mount) *FS {
 		if err != nil {
 			continue
 		}
+		// Resolve any symlinks in the mount path itself
+		// This handles cases like /var -> /private/var on macOS
+		if realHP, err := filepath.EvalSymlinks(hp); err == nil {
+			hp = realHP
+		}
 		normalized = append(normalized, Mount{
 			VirtualPath: vp,
 			HostPath:    hp,
 			Mode:        m.Mode,
 		})
 	}
-	return &FS{mounts: normalized}
+	f := &FS{
+		mounts:       normalized,
+		maxFileSize:  DefaultMaxFileSize,
+		maxWriteSize: DefaultMaxWriteSize,
+		maxPathLen:   DefaultMaxPathLength,
+	}
+	for _, opt := range opts {
+		opt(f)
+	}
+	return f
 }
 
 // resolve maps a virtual path to a host path, checking permissions.
 // Returns the host path and whether write access is allowed.
 func (f *FS) resolve(virtualPath string, needWrite bool) (string, error) {
+	// Check path length first
+	if len(virtualPath) > f.maxPathLen {
+		return "", errors.New("path too long")
+	}
+
 	f.mu.RLock()
 	defer f.mu.RUnlock()
 
@@ -93,6 +135,26 @@ func (f *FS) resolve(virtualPath string, needWrite bool) (string, error) {
 				return "", errors.New("permission denied: path escape attempt")
 			}
 
+			// Security: resolve symlinks and check again
+			// Only check if path exists (for reads) or parent exists (for writes)
+			if realPath, err := filepath.EvalSymlinks(absHostPath); err == nil {
+				if !strings.HasPrefix(realPath, m.HostPath) {
+					return "", errors.New("permission denied: symlink escape attempt")
+				}
+				return realPath, nil
+			} else if !os.IsNotExist(err) {
+				// For non-existence errors (other than file not found), fail
+				return "", errors.New("invalid path")
+			}
+
+			// Path doesn't exist yet (valid for writes), check parent
+			parentPath := filepath.Dir(absHostPath)
+			if realParent, err := filepath.EvalSymlinks(parentPath); err == nil {
+				if !strings.HasPrefix(realParent, m.HostPath) {
+					return "", errors.New("permission denied: symlink escape attempt")
+				}
+			}
+
 			return absHostPath, nil
 		}
 	}
@@ -112,11 +174,23 @@ func (f *FS) Read(ctx context.Context, args map[string]any) (any, error) {
 		return nil, err
 	}
 
-	data, err := os.ReadFile(hostPath)
+	// Check file size before reading
+	info, err := os.Stat(hostPath)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, errors.New("file not found: " + path)
 		}
+		return nil, errors.New("stat error: " + err.Error())
+	}
+	if info.IsDir() {
+		return nil, errors.New("cannot read directory: " + path)
+	}
+	if info.Size() > f.maxFileSize {
+		return nil, errors.New("file too large")
+	}
+
+	data, err := os.ReadFile(hostPath)
+	if err != nil {
 		return nil, errors.New("read error: " + err.Error())
 	}
 
@@ -132,6 +206,9 @@ func (f *FS) Write(ctx context.Context, args map[string]any) (any, error) {
 	content, ok := args["content"].(string)
 	if !ok {
 		return nil, errors.New("content required")
+	}
+	if int64(len(content)) > f.maxWriteSize {
+		return nil, errors.New("content too large")
 	}
 
 	hostPath, err := f.resolve(path, true)
