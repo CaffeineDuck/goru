@@ -45,10 +45,14 @@ goru repl                                # Interactive REPL
 goru repl -kv                            # REPL with KV store
 ```
 
-**Python Packages** - Install PyPI packages for sandboxed use:
+**Python Packages** - Two ways to use PyPI packages:
 ```bash
+# Pre-install packages (recommended for production)
 goru deps install requests pydantic      # Install to .goru/python/packages
 goru repl -packages .goru/python/packages
+
+# Or allow runtime installation from inside sandboxed code
+# (use WithAllowedPackages in Go API)
 ```
 
 **Capabilities** - Enable features explicitly:
@@ -97,6 +101,7 @@ By default, sandboxed code can do nothing dangerous:
 | Filesystem | Blocked | `WithMount("/data", "./input", MountReadOnly)` |
 | Network | Blocked | `WithAllowedHosts([]string{"api.example.com"})` |
 | KV Store | Blocked | `WithKV()` |
+| Package Install | Blocked | `WithAllowedPackages([]string{"requests"})` |
 | Memory | 256MB | `WithMemoryLimit(executor.MemoryLimit64MB)` |
 | System calls | Blocked | N/A (WASM has no syscalls) |
 
@@ -116,6 +121,10 @@ fs.write_text("/output/result.txt", "done")
 # KV Store (requires -kv or WithKV)
 kv.set("key", {"nested": "value"})
 print(kv.get("key"))
+
+# Runtime package install (requires WithAllowedPackages)
+install_pkg("requests")
+import requests  # Now available
 
 # Custom host functions
 user = call("get_user", id="123")  # Calls Go function
