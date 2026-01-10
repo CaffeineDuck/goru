@@ -26,10 +26,10 @@ TMPDIR=$(mktemp -d)
 trap "rm -rf $TMPDIR" EXIT
 cd "$TMPDIR"
 
-echo "Downloading..."
-if curl -fsSL -o goru "${BASE_URL}/${BINARY}" 2>/dev/null; then
+echo "Downloading ${BINARY}..."
+if curl -fL --progress-bar -o goru "${BASE_URL}/${BINARY}" 2>&1; then
     :
-elif curl -fsSL -o goru.tar.gz "${BASE_URL}/${BINARY}.tar.gz" 2>/dev/null; then
+elif curl -fL --progress-bar -o goru.tar.gz "${BASE_URL}/${BINARY}.tar.gz" 2>&1; then
     tar xzf goru.tar.gz
 else
     echo "Error: Failed to download goru for ${OS}/${ARCH}"
