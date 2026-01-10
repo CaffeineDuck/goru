@@ -59,3 +59,15 @@ jobs:
         with:
           files: goru*
           generate_release_notes: true
+
+  go-proxy:
+    needs: release
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+
+      - name: Trigger Go module proxy
+        run: |
+          GOPROXY=proxy.golang.org go list -m github.com/caffeineduck/goru@${{ github.ref_name }}
