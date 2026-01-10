@@ -41,17 +41,16 @@ type Session struct {
 }
 
 type sessionConfig struct {
-	timeout          time.Duration
-	allowedHosts     []string
-	mounts           []hostfunc.Mount
-	packagesPath     string
-	pkgInstall       bool
-	allowedPackages  []string
-	httpMaxURLLength int
-	httpMaxBodySize  int64
-	httpTimeout      time.Duration
-	fsOptions        []hostfunc.FSOption
-	env              map[string]string
+	timeout         time.Duration
+	mounts          []hostfunc.Mount
+	fsOptions       []hostfunc.FSOption
+	httpConfig      hostfunc.HTTPConfig
+	kvEnabled       bool
+	kvConfig        hostfunc.KVConfig
+	packagesPath    string
+	pkgInstall      bool
+	allowedPackages []string
+	env             map[string]string
 }
 
 func defaultSessionConfig() sessionConfig {
@@ -71,7 +70,7 @@ func WithSessionTimeout(d time.Duration) SessionOption {
 
 func WithSessionAllowedHosts(hosts []string) SessionOption {
 	return func(c *sessionConfig) {
-		c.allowedHosts = hosts
+		c.httpConfig.AllowedHosts = hosts
 	}
 }
 
@@ -106,19 +105,33 @@ func WithAllowedPackages(packages []string) SessionOption {
 
 func WithSessionHTTPTimeout(d time.Duration) SessionOption {
 	return func(c *sessionConfig) {
-		c.httpTimeout = d
+		c.httpConfig.RequestTimeout = d
 	}
 }
 
 func WithSessionHTTPMaxURLLength(size int) SessionOption {
 	return func(c *sessionConfig) {
-		c.httpMaxURLLength = size
+		c.httpConfig.MaxURLLength = size
 	}
 }
 
 func WithSessionHTTPMaxBodySize(size int64) SessionOption {
 	return func(c *sessionConfig) {
-		c.httpMaxBodySize = size
+		c.httpConfig.MaxBodySize = size
+	}
+}
+
+func WithSessionKV() SessionOption {
+	return func(c *sessionConfig) {
+		c.kvEnabled = true
+		c.kvConfig = hostfunc.DefaultKVConfig()
+	}
+}
+
+func WithSessionKVConfig(cfg hostfunc.KVConfig) SessionOption {
+	return func(c *sessionConfig) {
+		c.kvEnabled = true
+		c.kvConfig = cfg
 	}
 }
 
@@ -228,13 +241,16 @@ func (s *Session) registerHostFunctions() {
 		return float64(time.Now().UnixNano()) / 1e9, nil
 	})
 
-	if len(s.cfg.allowedHosts) > 0 {
-		httpHandler := hostfunc.NewHTTP(hostfunc.HTTPConfig{
-			AllowedHosts:   s.cfg.allowedHosts,
-			MaxURLLength:   s.cfg.httpMaxURLLength,
-			MaxBodySize:    s.cfg.httpMaxBodySize,
-			RequestTimeout: s.cfg.httpTimeout,
-		})
+	if s.cfg.kvEnabled {
+		kv := hostfunc.NewKV(s.cfg.kvConfig)
+		s.registry.Register("kv_get", kv.Get)
+		s.registry.Register("kv_set", kv.Set)
+		s.registry.Register("kv_delete", kv.Delete)
+		s.registry.Register("kv_keys", kv.Keys)
+	}
+
+	if len(s.cfg.httpConfig.AllowedHosts) > 0 {
+		httpHandler := hostfunc.NewHTTP(s.cfg.httpConfig)
 		s.registry.Register("http_request", httpHandler.Request)
 	}
 

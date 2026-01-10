@@ -118,20 +118,18 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		return float64(time.Now().UnixNano()) / 1e9, nil
 	})
 
-	if len(cfg.allowedHosts) > 0 {
-		httpHandler := hostfunc.NewHTTP(hostfunc.HTTPConfig{
-			AllowedHosts:   cfg.allowedHosts,
-			MaxURLLength:   cfg.httpMaxURLLength,
-			MaxBodySize:    cfg.httpMaxBodySize,
-			RequestTimeout: cfg.httpTimeout,
-		})
+	if cfg.kvEnabled {
+		kv := hostfunc.NewKV(cfg.kvConfig)
+		registry.Register("kv_get", kv.Get)
+		registry.Register("kv_set", kv.Set)
+		registry.Register("kv_delete", kv.Delete)
+		registry.Register("kv_keys", kv.Keys)
+	}
+
+	if len(cfg.httpConfig.AllowedHosts) > 0 {
+		httpHandler := hostfunc.NewHTTP(cfg.httpConfig)
 		registry.Register("http_request", httpHandler.Request)
-		registry.Register("http_get", hostfunc.NewHTTPGet(hostfunc.HTTPConfig{
-			AllowedHosts:   cfg.allowedHosts,
-			MaxURLLength:   cfg.httpMaxURLLength,
-			MaxBodySize:    cfg.httpMaxBodySize,
-			RequestTimeout: cfg.httpTimeout,
-		}))
+		registry.Register("http_get", hostfunc.NewHTTPGet(cfg.httpConfig))
 	}
 
 	if len(cfg.mounts) > 0 {

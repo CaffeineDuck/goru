@@ -10,13 +10,12 @@ import (
 type Option func(*runConfig)
 
 type runConfig struct {
-	timeout          time.Duration
-	allowedHosts     []string
-	mounts           []hostfunc.Mount
-	httpMaxURLLength int
-	httpMaxBodySize  int64
-	httpTimeout      time.Duration
-	fsOptions        []hostfunc.FSOption
+	timeout    time.Duration
+	mounts     []hostfunc.Mount
+	fsOptions  []hostfunc.FSOption
+	httpConfig hostfunc.HTTPConfig
+	kvEnabled  bool
+	kvConfig   hostfunc.KVConfig
 }
 
 func defaultRunConfig() runConfig {
@@ -35,7 +34,7 @@ func WithTimeout(d time.Duration) Option {
 // WithAllowedHosts sets the list of hosts that HTTP requests can access.
 func WithAllowedHosts(hosts []string) Option {
 	return func(c *runConfig) {
-		c.allowedHosts = hosts
+		c.httpConfig.AllowedHosts = hosts
 	}
 }
 
@@ -69,21 +68,21 @@ func WithMount(virtualPath, hostPath string, mode hostfunc.MountMode) Option {
 // WithHTTPMaxURLLength sets the maximum URL length for HTTP requests.
 func WithHTTPMaxURLLength(size int) Option {
 	return func(c *runConfig) {
-		c.httpMaxURLLength = size
+		c.httpConfig.MaxURLLength = size
 	}
 }
 
 // WithHTTPMaxBodySize sets the maximum response body size for HTTP requests.
 func WithHTTPMaxBodySize(size int64) Option {
 	return func(c *runConfig) {
-		c.httpMaxBodySize = size
+		c.httpConfig.MaxBodySize = size
 	}
 }
 
 // WithHTTPTimeout sets the timeout for individual HTTP requests.
 func WithHTTPTimeout(d time.Duration) Option {
 	return func(c *runConfig) {
-		c.httpTimeout = d
+		c.httpConfig.RequestTimeout = d
 	}
 }
 
@@ -105,6 +104,22 @@ func WithFSMaxWriteSize(size int64) Option {
 func WithFSMaxPathLength(length int) Option {
 	return func(c *runConfig) {
 		c.fsOptions = append(c.fsOptions, hostfunc.WithMaxPathLength(length))
+	}
+}
+
+// WithKV enables the key-value store with default limits.
+func WithKV() Option {
+	return func(c *runConfig) {
+		c.kvEnabled = true
+		c.kvConfig = hostfunc.DefaultKVConfig()
+	}
+}
+
+// WithKVConfig enables the key-value store with custom configuration.
+func WithKVConfig(cfg hostfunc.KVConfig) Option {
+	return func(c *runConfig) {
+		c.kvEnabled = true
+		c.kvConfig = cfg
 	}
 }
 
