@@ -53,6 +53,8 @@ go get github.com/caffeineduck/goru
 ```bash
 goru script.py                              # Run file
 goru --lang python -c 'print(1+1)'          # Inline code
+echo 'print(1+1)' | goru -l python          # Pipe code via stdin
+echo 'console.log(1+1)' | goru -l js        # Works with JavaScript too
 goru repl --lang python                     # Interactive REPL
 goru --help                                 # Full options
 ```
