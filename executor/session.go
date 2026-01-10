@@ -16,11 +16,14 @@ import (
 	"github.com/tetratelabs/wazero/api"
 )
 
+// Session errors.
 var (
 	ErrSessionClosed = errors.New("session closed")
 	ErrSessionBusy   = errors.New("session busy")
 )
 
+// Session represents a stateful execution environment that maintains state
+// across multiple Run calls. Create sessions via [Executor.NewSession].
 type Session struct {
 	exec     *Executor
 	lang     Language
@@ -60,20 +63,24 @@ func defaultSessionConfig() sessionConfig {
 	}
 }
 
+// SessionOption configures session behavior.
 type SessionOption func(*sessionConfig)
 
+// WithSessionTimeout sets the maximum execution time per Run call.
 func WithSessionTimeout(d time.Duration) SessionOption {
 	return func(c *sessionConfig) {
 		c.timeout = d
 	}
 }
 
+// WithSessionAllowedHosts enables HTTP and sets allowed hosts.
 func WithSessionAllowedHosts(hosts []string) SessionOption {
 	return func(c *sessionConfig) {
 		c.httpConfig.AllowedHosts = hosts
 	}
 }
 
+// WithSessionMount adds a filesystem mount point.
 func WithSessionMount(virtualPath, hostPath string, mode hostfunc.MountMode) SessionOption {
 	return func(c *sessionConfig) {
 		c.mounts = append(c.mounts, hostfunc.Mount{
@@ -84,18 +91,21 @@ func WithSessionMount(virtualPath, hostPath string, mode hostfunc.MountMode) Ses
 	}
 }
 
+// WithPackages mounts a directory as /packages for Python imports.
 func WithPackages(path string) SessionOption {
 	return func(c *sessionConfig) {
 		c.packagesPath = path
 	}
 }
 
+// WithPackageInstall enables runtime package installation via install_pkg().
 func WithPackageInstall(enabled bool) SessionOption {
 	return func(c *sessionConfig) {
 		c.pkgInstall = enabled
 	}
 }
 
+// WithAllowedPackages enables package installation restricted to the specified packages.
 func WithAllowedPackages(packages []string) SessionOption {
 	return func(c *sessionConfig) {
 		c.pkgInstall = true
@@ -103,24 +113,28 @@ func WithAllowedPackages(packages []string) SessionOption {
 	}
 }
 
+// WithSessionHTTPTimeout sets the timeout for individual HTTP requests.
 func WithSessionHTTPTimeout(d time.Duration) SessionOption {
 	return func(c *sessionConfig) {
 		c.httpConfig.RequestTimeout = d
 	}
 }
 
+// WithSessionHTTPMaxURLLength sets the maximum URL length for HTTP requests.
 func WithSessionHTTPMaxURLLength(size int) SessionOption {
 	return func(c *sessionConfig) {
 		c.httpConfig.MaxURLLength = size
 	}
 }
 
+// WithSessionHTTPMaxBodySize sets the maximum response body size for HTTP requests.
 func WithSessionHTTPMaxBodySize(size int64) SessionOption {
 	return func(c *sessionConfig) {
 		c.httpConfig.MaxBodySize = size
 	}
 }
 
+// WithSessionKV enables the in-memory key-value store with default limits.
 func WithSessionKV() SessionOption {
 	return func(c *sessionConfig) {
 		c.kvEnabled = true
@@ -128,6 +142,7 @@ func WithSessionKV() SessionOption {
 	}
 }
 
+// WithSessionKVConfig enables the key-value store with custom limits.
 func WithSessionKVConfig(cfg hostfunc.KVConfig) SessionOption {
 	return func(c *sessionConfig) {
 		c.kvEnabled = true
@@ -135,12 +150,16 @@ func WithSessionKVConfig(cfg hostfunc.KVConfig) SessionOption {
 	}
 }
 
+// WithSessionFSMaxFileSize sets the maximum file size for read operations.
 func WithSessionFSMaxFileSize(size int64) SessionOption {
 	return func(c *sessionConfig) {
 		c.fsOptions = append(c.fsOptions, hostfunc.WithMaxFileSize(size))
 	}
 }
 
+// NewSession creates a stateful execution session for the given language.
+// Sessions maintain state across multiple Run calls and support capabilities
+// like HTTP, filesystem access, and key-value storage.
 func (e *Executor) NewSession(lang Language, opts ...SessionOption) (*Session, error) {
 	cfg := defaultSessionConfig()
 	for _, opt := range opts {
@@ -285,6 +304,7 @@ type execCommand struct {
 	Repl bool   `json:"repl,omitempty"`
 }
 
+// Run executes code in the session, maintaining state from previous calls.
 func (s *Session) Run(ctx context.Context, code string) Result {
 	return s.runInternal(ctx, code, false)
 }
@@ -378,6 +398,7 @@ func (s *Session) CheckComplete(ctx context.Context, code string) (bool, error) 
 	}
 }
 
+// Close terminates the session and releases resources.
 func (s *Session) Close() error {
 	s.mu.Lock()
 	defer s.mu.Unlock()

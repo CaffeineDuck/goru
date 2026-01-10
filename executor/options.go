@@ -172,10 +172,12 @@ func WithMemoryLimit(pages uint32) ExecutorOption {
 	}
 }
 
+// Memory limit constants for use with [WithMemoryLimit].
+// Each WASM page is 64KB.
 const (
-	MemoryLimit1MB   uint32 = 16
-	MemoryLimit16MB  uint32 = 256
-	MemoryLimit64MB  uint32 = 1024
-	MemoryLimit256MB uint32 = 4096
-	MemoryLimit1GB   uint32 = 16384
+	MemoryLimit1MB   uint32 = 16    // 1 MB (16 pages)
+	MemoryLimit16MB  uint32 = 256   // 16 MB (256 pages)
+	MemoryLimit64MB  uint32 = 1024  // 64 MB (1024 pages)
+	MemoryLimit256MB uint32 = 4096  // 256 MB (4096 pages) - default
+	MemoryLimit1GB   uint32 = 16384 // 1 GB (16384 pages)
 )

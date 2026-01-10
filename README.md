@@ -19,12 +19,12 @@ You need to execute user-submitted or AI-generated code. Your options:
 
 ## Features
 
-- **Bidirectional host-guest protocol** - Sandboxed code calls Go functions via `call()`, Go receives structured responses ([docs](docs/host-functions.md#custom-functions))
-- **Async batching** - Concurrent host calls with `asyncio.gather()` / `Promise.all()` batched into single round-trip ([docs](docs/host-functions.md#async-support))
+- **Bidirectional host-guest protocol** - Sandboxed code calls Go functions via `call()`, Go receives structured responses ([docs](docs/sandbox-api.md#call))
+- **Async batching** - Concurrent host calls with `asyncio.gather()` / `Promise.all()` batched into single round-trip ([docs](docs/sandbox-api.md#async-batching))
 - **Capability-based security** - Zero permissions by default, opt-in HTTP/filesystem/KV per-session
-- **Session state** - Variables persist across executions, define functions once and reuse ([docs](docs/api.md#sessions))
-- **Built-in modules** - `http`, `fs`, `kv` available in sandbox without imports when enabled ([docs](docs/host-functions.md#built-in-modules))
-- **Python packages** - Pre-install via CLI or allow runtime `install_pkg()` from sandboxed code ([docs](docs/python.md#package-installation))
+- **Session state** - Variables persist across executions, define functions once and reuse ([docs](https://pkg.go.dev/github.com/caffeineduck/goru/executor#Session))
+- **Built-in modules** - `http`, `fs`, `kv` available in sandbox without imports when enabled ([docs](docs/sandbox-api.md#modules))
+- **Python packages** - Pre-install via CLI or allow runtime `install_pkg()` from sandboxed code ([docs](docs/sandbox-api.md#install_pkg-python-only))
 
 ## Security Model
 
@@ -59,81 +59,28 @@ goru --help                                 # Full options
 
 ## Go API
 
-### Basic Execution
-
 ```go
-import (
-    "github.com/caffeineduck/goru/executor"
-    "github.com/caffeineduck/goru/hostfunc"
-    "github.com/caffeineduck/goru/language/python"
-)
-
-// Create executor
 exec, _ := executor.New(hostfunc.NewRegistry())
 defer exec.Close()
 
-// Run code (stateless)
-result := exec.Run(ctx, python.New(), `print("hello")`)
-fmt.Println(result.Output)  // "hello\n"
-fmt.Println(result.Error)   // nil
-```
-
-### Sessions (Persistent State)
-
-```go
-session, _ := exec.NewSession(python.New())
-defer session.Close()
-
-session.Run(ctx, `x = 42`)
-session.Run(ctx, `y = x * 2`)
-result := session.Run(ctx, `print(y)`)  // Output: "84\n"
-```
-
-### Session with Capabilities
-
-```go
 session, _ := exec.NewSession(python.New(),
-    executor.WithSessionTimeout(10*time.Second),
     executor.WithSessionAllowedHosts([]string{"api.example.com"}),
     executor.WithSessionMount("/data", "./input", hostfunc.MountReadOnly),
     executor.WithSessionKV(),
 )
 defer session.Close()
 
-// Now sandboxed code can use http, fs, kv modules
-session.Run(ctx, `resp = http.get("https://api.example.com/users")`)
-session.Run(ctx, `config = fs.read_json("/data/config.json")`)
-session.Run(ctx, `kv.set("key", "value")`)
+session.Run(ctx, `x = 42`)
+session.Run(ctx, `resp = http.get("https://api.example.com/data")`)
+result := session.Run(ctx, `print(x, resp["status"])`)
 ```
 
-### Custom Host Functions
-
-```go
-registry := hostfunc.NewRegistry()
-registry.Register("get_user", func(ctx context.Context, args map[string]any) (any, error) {
-    id := args["id"].(string)
-    return map[string]any{"id": id, "name": "Alice"}, nil
-})
-
-exec, _ := executor.New(registry)
-session, _ := exec.NewSession(python.New())
-session.Run(ctx, `user = call("get_user", id="123")`)  // user["name"] = "Alice"
-```
-
-### Executor Options
-
-```go
-exec, _ := executor.New(registry,
-    executor.WithDiskCache(),                      // Cache compiled WASM (default)
-    executor.WithMemoryLimit(executor.MemoryLimit64MB),
-)
-```
+Full API: [pkg.go.dev/github.com/caffeineduck/goru](https://pkg.go.dev/github.com/caffeineduck/goru)
 
 ## Documentation
 
-- [Go API](docs/api.md)
-- [Host Functions](docs/host-functions.md)
-- [Python](docs/python.md) | [JavaScript](docs/javascript.md)
+- [Sandbox API](docs/sandbox-api.md) - APIs for Python/JavaScript code running in the sandbox
+- [Go API](https://pkg.go.dev/github.com/caffeineduck/goru) - Go embedding documentation on pkg.go.dev
 
 ## License
 

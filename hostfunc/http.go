@@ -12,12 +12,14 @@ import (
 	"time"
 )
 
+// Default limits for HTTP requests.
 const (
-	DefaultMaxURLLength   = 8192
-	DefaultMaxBodySize    = 1 << 20 // 1MB
-	DefaultRequestTimeout = 30 * time.Second
+	DefaultMaxURLLength   = 8192             // Maximum URL length in bytes
+	DefaultMaxBodySize    = 1 << 20          // Maximum response body size (1MB)
+	DefaultRequestTimeout = 30 * time.Second // Request timeout
 )
 
+// HTTPConfig configures HTTP request handling.
 type HTTPConfig struct {
 	AllowedHosts   []string
 	MaxBodySize    int64
@@ -25,11 +27,14 @@ type HTTPConfig struct {
 	RequestTimeout time.Duration
 }
 
+// HTTP provides controlled HTTP request capabilities for sandboxed code.
 type HTTP struct {
 	cfg    HTTPConfig
 	client *http.Client
 }
 
+// NewHTTP creates an HTTP handler with the given configuration.
+// Requests are only allowed to hosts listed in cfg.AllowedHosts.
 func NewHTTP(cfg HTTPConfig) *HTTP {
 	if cfg.MaxBodySize == 0 {
 		cfg.MaxBodySize = DefaultMaxBodySize
@@ -49,6 +54,8 @@ func NewHTTP(cfg HTTPConfig) *HTTP {
 	}
 }
 
+// Request performs an HTTP request. Args: method, url, body (optional), headers (optional).
+// Returns a map with status, body, and headers.
 func (h *HTTP) Request(ctx context.Context, args map[string]any) (any, error) {
 	method, _ := args["method"].(string)
 	if method == "" {
@@ -166,6 +173,7 @@ func (h *HTTP) isHostAllowed(host string) bool {
 	return false
 }
 
+// NewHTTPGet returns a host function for GET-only requests.
 func NewHTTPGet(cfg HTTPConfig) Func {
 	h := NewHTTP(cfg)
 	return func(ctx context.Context, args map[string]any) (any, error) {

@@ -9,12 +9,14 @@ import (
 	"strings"
 )
 
+// PkgConfig configures the package installer.
 type PkgConfig struct {
-	PackageDir      string
-	AllowedPackages []string
-	Enabled         bool
+	PackageDir      string   // Directory to install packages into
+	AllowedPackages []string // If set, only these packages can be installed
+	Enabled         bool     // Whether package installation is enabled
 }
 
+// DefaultPkgConfig returns the default package installer configuration.
 func DefaultPkgConfig() PkgConfig {
 	return PkgConfig{
 		PackageDir: ".goru/python/packages",
@@ -22,6 +24,8 @@ func DefaultPkgConfig() PkgConfig {
 	}
 }
 
+// NewPkgInstaller returns a host function for installing Python packages via pip.
+// Args: name (required), version (optional).
 func NewPkgInstaller(cfg PkgConfig) Func {
 	return func(ctx context.Context, args map[string]any) (any, error) {
 		if !cfg.Enabled {
