@@ -20,13 +20,12 @@ You need to execute user-submitted or AI-generated code. Your options:
 ## Install
 
 ```bash
+# CLI (from releases)
+curl -fsSL https://github.com/caffeineduck/goru/releases/latest/download/goru-$(uname -s)-$(uname -m).tar.gz | tar xz
+sudo mv goru /usr/local/bin/
+
 # Go library
 go get github.com/caffeineduck/goru
-
-# CLI
-go install github.com/caffeineduck/goru/cmd/goru@latest
-# or from releases
-curl -fsSL https://github.com/caffeineduck/goru/releases/latest/download/goru-$(uname -s)-$(uname -m).tar.gz | tar xz
 ```
 
 ## CLI Quick Start
@@ -70,35 +69,21 @@ session.Run(ctx, `y = x * 2`)
 result := session.Run(ctx, `print(y)`)  // Output: "84\n"
 ```
 
-### HTTP Access
+### Session with Capabilities
 
 ```go
-result := exec.Run(ctx, python.New(), `
-resp = http.get("https://api.example.com/data")
-print(resp.json())
-`, executor.WithAllowedHosts([]string{"api.example.com"}))
-```
-
-### Filesystem Access
-
-```go
-result := exec.Run(ctx, python.New(), `
-config = fs.read_json("/data/config.json")
-fs.write_text("/output/result.txt", "done")
-`,
-    executor.WithMount("/data", "./input", hostfunc.MountReadOnly),
-    executor.WithMount("/output", "./results", hostfunc.MountReadWrite),
+session, _ := exec.NewSession(python.New(),
+    executor.WithSessionTimeout(10*time.Second),
+    executor.WithSessionAllowedHosts([]string{"api.example.com"}),
+    executor.WithSessionMount("/data", "./input", hostfunc.MountReadOnly),
+    executor.WithSessionKV(),
 )
-```
+defer session.Close()
 
-### Key-Value Store
-
-```go
-result := exec.Run(ctx, python.New(), `
-kv.set("user", {"name": "Alice", "score": 100})
-user = kv.get("user")
-print(user["name"])
-`, executor.WithKV())
+// Now sandboxed code can use http, fs, kv modules
+session.Run(ctx, `resp = http.get("https://api.example.com/users")`)
+session.Run(ctx, `config = fs.read_json("/data/config.json")`)
+session.Run(ctx, `kv.set("key", "value")`)
 ```
 
 ### Custom Host Functions
@@ -111,30 +96,16 @@ registry.Register("get_user", func(ctx context.Context, args map[string]any) (an
 })
 
 exec, _ := executor.New(registry)
-result := exec.Run(ctx, python.New(), `
-user = call("get_user", id="123")
-print(user["name"])  # Alice
-`)
-```
-
-### Session Options
-
-```go
-session, _ := exec.NewSession(python.New(),
-    executor.WithSessionTimeout(10*time.Second),
-    executor.WithSessionAllowedHosts([]string{"api.example.com"}),
-    executor.WithSessionMount("/data", "./input", hostfunc.MountReadOnly),
-    executor.WithSessionKV(),
-)
+session, _ := exec.NewSession(python.New())
+session.Run(ctx, `user = call("get_user", id="123")`)  // user["name"] = "Alice"
 ```
 
 ### Executor Options
 
 ```go
 exec, _ := executor.New(registry,
-    executor.WithDiskCache(),                    // Cache compiled WASM (default)
+    executor.WithDiskCache(),                      // Cache compiled WASM (default)
     executor.WithMemoryLimit(executor.MemoryLimit64MB),
-    executor.WithPrecompile(python.New()),       // Warm up Python runtime
 )
 ```
 
