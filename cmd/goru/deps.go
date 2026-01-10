@@ -79,6 +79,35 @@ type pypiResponse struct {
 	Urls []pypiURL `json:"urls"`
 }
 
+// Packages that won't work in WASM (require C extensions, sockets, etc.)
+var blockedPackages = map[string]string{
+	"numpy":       "requires C extensions",
+	"pandas":      "requires C extensions (numpy)",
+	"scipy":       "requires C extensions",
+	"tensorflow":  "requires C extensions",
+	"torch":       "requires C extensions",
+	"pytorch":     "requires C extensions",
+	"scikit-learn": "requires C extensions",
+	"sklearn":     "requires C extensions",
+	"matplotlib":  "requires C extensions",
+	"pillow":      "requires C extensions",
+	"pil":         "requires C extensions",
+	"opencv-python": "requires C extensions",
+	"cv2":         "requires C extensions",
+	"aiohttp":     "requires async sockets (not available in WASM)",
+	"flask":       "requires sockets (not available in WASM)",
+	"django":      "requires sockets (not available in WASM)",
+	"fastapi":     "requires sockets (not available in WASM)",
+	"uvicorn":     "requires sockets (not available in WASM)",
+	"gunicorn":    "requires sockets (not available in WASM)",
+	"psycopg2":    "requires C extensions",
+	"mysqlclient": "requires C extensions",
+	"cryptography": "requires C extensions",
+	"bcrypt":      "requires C extensions",
+	"lxml":        "requires C extensions",
+	"grpcio":      "requires C extensions",
+}
+
 func runDepsInstall(cmd *cobra.Command, args []string) {
 	if err := os.MkdirAll(depsPkgDir, 0755); err != nil {
 		fmt.Fprintf(os.Stderr, "Error: failed to create package dir: %v\n", err)
@@ -87,6 +116,14 @@ func runDepsInstall(cmd *cobra.Command, args []string) {
 
 	for _, pkg := range args {
 		name, version := parsePackageSpec(pkg)
+
+		// Check blocklist
+		if reason, blocked := blockedPackages[strings.ToLower(name)]; blocked {
+			fmt.Fprintf(os.Stderr, "Error: %s is not supported in WASM (%s)\n", name, reason)
+			fmt.Fprintf(os.Stderr, "See docs/python.md for compatible packages\n")
+			os.Exit(1)
+		}
+
 		if err := installPackage(name, version); err != nil {
 			fmt.Fprintf(os.Stderr, "Error installing %s: %v\n", name, err)
 			os.Exit(1)
@@ -195,6 +232,15 @@ func extractWheel(wheelPath, destDir string) error {
 	}
 	defer r.Close()
 
+	// First pass: check for C extensions
+	for _, f := range r.File {
+		name := strings.ToLower(f.Name)
+		if strings.HasSuffix(name, ".so") || strings.HasSuffix(name, ".pyd") || strings.HasSuffix(name, ".dylib") {
+			return fmt.Errorf("package contains C extensions (%s) which won't work in WASM", filepath.Base(f.Name))
+		}
+	}
+
+	// Second pass: extract files
 	for _, f := range r.File {
 		// Skip .dist-info directories (metadata)
 		if strings.Contains(f.Name, ".dist-info/") {
