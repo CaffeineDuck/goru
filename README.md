@@ -19,10 +19,21 @@ goru is a Go library that sandboxes code execution using WebAssembly. No contain
 - **Plugin systems** - Let users extend your app with custom scripts
 - **Educational platforms** - Safe code playgrounds for students
 
+## Prerequisites
+
+- Go 1.25.5 or higher
+
 ## Install
 
 ```bash
-go get github.com/caffeineduck/goru
+git clone https://github.com/caffeineduck/goru
+cd goru
+
+# Download WASM runtimes (~28MB total)
+go generate ./...
+
+# Build
+go build -o goru ./cmd/goru
 ```
 
 ## Usage
@@ -111,6 +122,23 @@ print(resp.json())
 # Filesystem (requires WithMount)
 data = fs.read_text("/input/config.json")
 fs.write_text("/output/result.txt", "done")
+
+# KV store (cross-run and cross-language data sharing)
+kv.set("result", {"score": 42})
+data = kv.get("result")
+print(data["score"])  # 42
+```
+
+**Async Support**: True async/await with concurrent host function execution:
+
+```python
+# HTTP (requires WithAllowedHosts)
+resp = http.get("https://api.example.com/data")
+print(resp.json())
+
+# Filesystem (requires WithMount)
+data = fs.read_text("/input/config.json")
+fs.write_text("/output/result.txt", "done")
 ```
 
 **Async Support**: True async/await with concurrent host function execution:
@@ -157,8 +185,27 @@ goru repl                               # Interactive REPL with persistent state
 goru serve -port 8080                   # HTTP API server
 
 # Package management (Python only)
-goru deps install pydantic requests     # Install packages
-goru deps list                          # List installed packages
+
+Install packages from PyPI for use in sandboxed code:
+
+```bash
+# Install packages to .goru/python/packages
+goru deps install pydantic requests
+
+# List installed packages
+goru deps list
+
+# Remove a package
+goru deps remove pydantic
+
+# Use in REPL
+goru repl -packages .goru/python/packages
+
+# Use in code
+session, _ := exec.NewSession(python.New(), executor.WithPackages(".goru/python/packages"))
+```
+
+Note: JavaScript packages not supported. Use bundling for JS.
 ```
 
 ## Trade-offs
