@@ -24,7 +24,6 @@ You need to execute user-submitted or AI-generated code. Your options:
 - **Custom host functions** - Expose Go functions to sandboxed code
 - **Sessions** - Persistent state across multiple executions
 - **Python packages** - Pure Python packages from PyPI (no pip required)
-- **Fast cold start** - ~1.5s Python, ~200ms JavaScript (with disk caching)
 - **Cross-platform** - Works on Linux, macOS, Windows (no Docker needed)
 
 ## Security Model
@@ -141,11 +140,6 @@ goru repl --lang python --packages .goru/python/packages
 ```
 
 ```go
-// Go API: use pre-installed packages
-session, _ := exec.NewSession(python.New(),
-    executor.WithPackages(".goru/python/packages"),
-)
-
 // Go API: allow runtime install from sandboxed code
 session, _ := exec.NewSession(python.New(),
     executor.WithAllowedPackages([]string{"pydantic>=2.0", "python-dateutil"}),
