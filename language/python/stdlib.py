@@ -114,6 +114,15 @@ def call(fn, **kwargs):
 async def async_call(fn, **kwargs):
     return await _async_call(fn, kwargs)
 
+def install_pkg(name, version=None):
+    args = {"name": name}
+    if version:
+        args["version"] = version
+    result = _goru_call("install_pkg", args)
+    if not result.get("success"):
+        raise RuntimeError(result.get("error", "package installation failed"))
+    return result
+
 class HTTPResponse:
     def __init__(self, data):
         self._data = data

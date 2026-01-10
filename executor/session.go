@@ -45,6 +45,8 @@ type sessionConfig struct {
 	allowedHosts     []string
 	mounts           []hostfunc.Mount
 	packagesPath     string
+	pkgInstall       bool
+	allowedPackages  []string
 	httpMaxURLLength int
 	httpMaxBodySize  int64
 	httpTimeout      time.Duration
@@ -86,6 +88,19 @@ func WithSessionMount(virtualPath, hostPath string, mode hostfunc.MountMode) Ses
 func WithPackages(path string) SessionOption {
 	return func(c *sessionConfig) {
 		c.packagesPath = path
+	}
+}
+
+func WithPackageInstall(enabled bool) SessionOption {
+	return func(c *sessionConfig) {
+		c.pkgInstall = enabled
+	}
+}
+
+func WithAllowedPackages(packages []string) SessionOption {
+	return func(c *sessionConfig) {
+		c.pkgInstall = true
+		c.allowedPackages = packages
 	}
 }
 
@@ -232,6 +247,19 @@ func (s *Session) registerHostFunctions() {
 		s.registry.Register("fs_mkdir", fs.Mkdir)
 		s.registry.Register("fs_remove", fs.Remove)
 		s.registry.Register("fs_stat", fs.Stat)
+	}
+
+	if s.cfg.pkgInstall {
+		pkgDir := s.cfg.packagesPath
+		if pkgDir == "" {
+			pkgDir = ".goru/python/packages"
+		}
+		installer := hostfunc.NewPkgInstaller(hostfunc.PkgConfig{
+			PackageDir:      pkgDir,
+			AllowedPackages: s.cfg.allowedPackages,
+			Enabled:         true,
+		})
+		s.registry.Register("install_pkg", installer)
 	}
 }
 

@@ -157,11 +157,10 @@ func WithMemoryLimit(pages uint32) ExecutorOption {
 	}
 }
 
-// Memory limit constants for convenience.
 const (
-	MemoryLimit1MB   uint32 = 16    // 1 MB
-	MemoryLimit16MB  uint32 = 256   // 16 MB
-	MemoryLimit64MB  uint32 = 1024  // 64 MB
-	MemoryLimit256MB uint32 = 4096  // 256 MB
-	MemoryLimit1GB   uint32 = 16384 // 1 GB
+	MemoryLimit1MB   uint32 = 16
+	MemoryLimit16MB  uint32 = 256
+	MemoryLimit64MB  uint32 = 1024
+	MemoryLimit256MB uint32 = 4096
+	MemoryLimit1GB   uint32 = 16384
 )
