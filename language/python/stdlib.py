@@ -243,6 +243,33 @@ class _FSModule:
 
 fs = _FSModule()
 
+class _KVModule:
+    def get(self, key, default=None):
+        return _goru_call("kv_get", {"key": key, "default": default})
+
+    def set(self, key, value):
+        return _goru_call("kv_set", {"key": key, "value": value})
+
+    def delete(self, key):
+        return _goru_call("kv_delete", {"key": key})
+
+    def keys(self):
+        return _goru_call("kv_keys", {})
+
+    async def async_get(self, key, default=None):
+        return await _async_call("kv_get", {"key": key, "default": default})
+
+    async def async_set(self, key, value):
+        return await _async_call("kv_set", {"key": key, "value": value})
+
+    async def async_delete(self, key):
+        return await _async_call("kv_delete", {"key": key})
+
+    async def async_keys(self):
+        return await _async_call("kv_keys", {})
+
+kv = _KVModule()
+
 def time_now():
     return _goru_call("time_now", {})
 
@@ -264,6 +291,7 @@ def _session_loop():
         "install_pkg": install_pkg,
         "http": http,
         "fs": fs,
+        "kv": kv,
         "HTTPResponse": HTTPResponse,
     })
 

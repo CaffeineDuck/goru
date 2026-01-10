@@ -10,6 +10,7 @@ import (
 
 	"github.com/caffeineduck/goru/executor"
 	"github.com/caffeineduck/goru/hostfunc"
+	"github.com/caffeineduck/goru/language/javascript"
 	"github.com/caffeineduck/goru/language/python"
 )
 
@@ -303,6 +304,108 @@ func TestConcurrentRuns(t *testing.T) {
 		if err != nil {
 			t.Errorf("concurrent run failed: %v", err)
 		}
+	}
+}
+
+// =============================================================================
+// KV STORE TESTS
+// =============================================================================
+
+func TestKVBasicPython(t *testing.T) {
+	code := `
+kv.set("test_key", "test_value")
+result = kv.get("test_key")
+print(result)
+`
+	result := sharedExec.Run(context.Background(), sharedLang, code, executor.WithKV())
+	if result.Error != nil {
+		t.Fatalf("execution failed: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "test_value" {
+		t.Errorf("expected test_value, got %q", result.Output)
+	}
+}
+
+func TestKVBasicJavaScript(t *testing.T) {
+	code := `
+kv.set("js_key", {value: 42});
+const result = kv.get("js_key");
+console.log(result.value);
+`
+	result := sharedExec.Run(context.Background(), javascript.New(), code, executor.WithKV())
+	if result.Error != nil {
+		t.Fatalf("execution failed: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "42" {
+		t.Errorf("expected 42, got %q", result.Output)
+	}
+}
+
+func TestKVGetDefault(t *testing.T) {
+	code := `
+result = kv.get("nonexistent", "default_val")
+print(result)
+`
+	result := sharedExec.Run(context.Background(), sharedLang, code, executor.WithKV())
+	if result.Error != nil {
+		t.Fatalf("execution failed: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "default_val" {
+		t.Errorf("expected default_val, got %q", result.Output)
+	}
+}
+
+func TestKVDelete(t *testing.T) {
+	code := `
+kv.set("to_delete", "value")
+kv.delete("to_delete")
+result = kv.get("to_delete")
+print(result is None)
+`
+	result := sharedExec.Run(context.Background(), sharedLang, code, executor.WithKV())
+	if result.Error != nil {
+		t.Fatalf("execution failed: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "True" {
+		t.Errorf("expected True, got %q", result.Output)
+	}
+}
+
+func TestKVKeys(t *testing.T) {
+	code := `
+kv.set("a", 1)
+kv.set("b", 2)
+keys = kv.keys()
+print(len(keys))
+`
+	result := sharedExec.Run(context.Background(), sharedLang, code, executor.WithKV())
+	if result.Error != nil {
+		t.Fatalf("execution failed: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "2" {
+		t.Errorf("expected 2, got %q", result.Output)
+	}
+}
+
+func TestKVIsolatedExecutors(t *testing.T) {
+	registry := hostfunc.NewRegistry()
+	exec1, _ := executor.New(registry)
+	exec2, _ := executor.New(registry)
+	defer exec1.Close()
+	defer exec2.Close()
+
+	exec1.Run(context.Background(), sharedLang, `kv.set("isolated", "exec1")`, executor.WithKV())
+
+	result := exec2.Run(context.Background(), sharedLang, `
+result = kv.get("isolated")
+print(result is None)
+`, executor.WithKV())
+
+	if result.Error != nil {
+		t.Fatalf("execution failed: %v", result.Error)
+	}
+	if strings.TrimSpace(result.Output) != "True" {
+		t.Errorf("expected True (isolated stores), got %q", result.Output)
 	}
 }
 

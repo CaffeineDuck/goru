@@ -202,6 +202,40 @@ const fs = {
   }
 };
 
+const kv = {
+  get(key, defaultValue = null) {
+    return _goru_call("kv_get", {key, default: defaultValue});
+  },
+
+  set(key, value) {
+    return _goru_call("kv_set", {key, value});
+  },
+
+  delete(key) {
+    return _goru_call("kv_delete", {key});
+  },
+
+  keys() {
+    return _goru_call("kv_keys", {});
+  },
+
+  async asyncGet(key, defaultValue = null) {
+    return await _asyncCall("kv_get", {key, default: defaultValue});
+  },
+
+  async asyncSet(key, value) {
+    return await _asyncCall("kv_set", {key, value});
+  },
+
+  async asyncDelete(key) {
+    return await _asyncCall("kv_delete", {key});
+  },
+
+  async asyncKeys() {
+    return await _asyncCall("kv_keys", {});
+  }
+};
+
 const time_now = () => _goru_call("time_now", {});
 
 const _sessionLoop = () => {
