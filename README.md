@@ -20,87 +20,141 @@ You need to execute user-submitted or AI-generated code. Your options:
 ## Install
 
 ```bash
-# CLI (from releases)
-curl -fsSL https://github.com/caffeineduck/goru/releases/latest/download/goru-$(uname -s)-$(uname -m).tar.gz | tar xz
-sudo mv goru /usr/local/bin/
-
-# Or build from source
-git clone https://github.com/caffeineduck/goru && cd goru
-go generate ./... && go build -o goru ./cmd/goru
-
 # Go library
 go get github.com/caffeineduck/goru
+
+# CLI
+go install github.com/caffeineduck/goru/cmd/goru@latest
+# or from releases
+curl -fsSL https://github.com/caffeineduck/goru/releases/latest/download/goru-$(uname -s)-$(uname -m).tar.gz | tar xz
 ```
 
-## Quick Start
+## CLI Quick Start
 
 ```bash
-# Run code (language auto-detected from file extension)
-goru script.py
-goru script.js
-
-# Inline code (--lang required)
-goru --lang python -c 'print(1+1)'
-goru --lang js -c 'console.log(1+1)'
-
-# Interactive REPL
-goru repl --lang python
-```
-
-## Security Model
-
-By default, sandboxed code has **zero capabilities** - no filesystem, no network, no system calls.
-
-| Capability | Default | Enable With |
-|------------|---------|-------------|
-| Filesystem | Blocked | `--mount /data:./local:ro` |
-| HTTP | Blocked | `--allow-host api.example.com` |
-| KV Store | Blocked | `--kv` |
-| Memory | 256MB | `--memory 64mb` |
-
-## Enabling Capabilities
-
-```bash
-# HTTP access (sandboxed code uses goru's http module, not requests/urllib)
-goru --lang python -c 'print(http.get("https://api.example.com").json())' \
-    --allow-host api.example.com
-
-# Filesystem access
-goru --lang python -c 'print(fs.read_text("/data/config.json"))' \
-    --mount /data:./mydata:ro
-
-# KV store
-goru --lang python -c 'kv.set("x", 42); print(kv.get("x"))' --kv
+goru script.py                              # Run file
+goru --lang python -c 'print(1+1)'          # Inline code
+goru repl --lang python                     # Interactive REPL
+goru --help                                 # Full options
 ```
 
 ## Go API
 
+### Basic Execution
+
 ```go
+import (
+    "github.com/caffeineduck/goru/executor"
+    "github.com/caffeineduck/goru/hostfunc"
+    "github.com/caffeineduck/goru/language/python"
+)
+
+// Create executor
 exec, _ := executor.New(hostfunc.NewRegistry())
 defer exec.Close()
 
-// Session with persistent state
-session, _ := exec.NewSession(python.New())
-session.Run(ctx, `x = 42`)
-session.Run(ctx, `print(x)`)  // 42
+// Run code (stateless)
+result := exec.Run(ctx, python.New(), `print("hello")`)
+fmt.Println(result.Output)  // "hello\n"
+fmt.Println(result.Error)   // nil
+```
 
-// With capabilities
+### Sessions (Persistent State)
+
+```go
+session, _ := exec.NewSession(python.New())
+defer session.Close()
+
+session.Run(ctx, `x = 42`)
+session.Run(ctx, `y = x * 2`)
+result := session.Run(ctx, `print(y)`)  // Output: "84\n"
+```
+
+### HTTP Access
+
+```go
+result := exec.Run(ctx, python.New(), `
+resp = http.get("https://api.example.com/data")
+print(resp.json())
+`, executor.WithAllowedHosts([]string{"api.example.com"}))
+```
+
+### Filesystem Access
+
+```go
+result := exec.Run(ctx, python.New(), `
+config = fs.read_json("/data/config.json")
+fs.write_text("/output/result.txt", "done")
+`,
+    executor.WithMount("/data", "./input", hostfunc.MountReadOnly),
+    executor.WithMount("/output", "./results", hostfunc.MountReadWrite),
+)
+```
+
+### Key-Value Store
+
+```go
+result := exec.Run(ctx, python.New(), `
+kv.set("user", {"name": "Alice", "score": 100})
+user = kv.get("user")
+print(user["name"])
+`, executor.WithKV())
+```
+
+### Custom Host Functions
+
+```go
+registry := hostfunc.NewRegistry()
+registry.Register("get_user", func(ctx context.Context, args map[string]any) (any, error) {
+    id := args["id"].(string)
+    return map[string]any{"id": id, "name": "Alice"}, nil
+})
+
+exec, _ := executor.New(registry)
+result := exec.Run(ctx, python.New(), `
+user = call("get_user", id="123")
+print(user["name"])  # Alice
+`)
+```
+
+### Session Options
+
+```go
 session, _ := exec.NewSession(python.New(),
+    executor.WithSessionTimeout(10*time.Second),
     executor.WithSessionAllowedHosts([]string{"api.example.com"}),
     executor.WithSessionMount("/data", "./input", hostfunc.MountReadOnly),
     executor.WithSessionKV(),
 )
 ```
 
+### Executor Options
+
+```go
+exec, _ := executor.New(registry,
+    executor.WithDiskCache(),                    // Cache compiled WASM (default)
+    executor.WithMemoryLimit(executor.MemoryLimit64MB),
+    executor.WithPrecompile(python.New()),       // Warm up Python runtime
+)
+```
+
+## Security Model
+
+By default, sandboxed code has **zero capabilities**:
+
+| Capability | Default | Enable With |
+|------------|---------|-------------|
+| Filesystem | Blocked | `WithMount()` |
+| HTTP | Blocked | `WithAllowedHosts()` |
+| KV Store | Blocked | `WithKV()` |
+| Host Functions | Blocked | `Registry.Register()` |
+
 ## Python Packages
 
 Only **pure Python** packages work (no C extensions, no sockets).
 
 ```bash
-# Install packages (downloads directly from PyPI, no pip required)
 goru deps install pydantic python-dateutil
-
-# Use in REPL
 goru repl --lang python --packages .goru/python/packages
 ```
 
@@ -109,7 +163,6 @@ Blocked: `numpy`, `pandas`, `requests`, `flask` (C extensions or sockets)
 
 ## Documentation
 
-- [CLI Reference](docs/cli.md)
 - [Go API](docs/api.md)
 - [Host Functions](docs/host-functions.md)
 - [Python](docs/python.md) | [JavaScript](docs/javascript.md)
