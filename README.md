@@ -41,9 +41,8 @@ By default, sandboxed code has **zero capabilities**:
 ## Install
 
 ```bash
-# CLI (from releases)
-curl -fsSL https://github.com/caffeineduck/goru/releases/latest/download/goru-$(uname -s)-$(uname -m).tar.gz | tar xz
-sudo mv goru /usr/local/bin/
+# CLI
+curl -fsSL https://raw.githubusercontent.com/caffeineduck/goru/main/install.sh | bash
 
 # Go library
 go get github.com/caffeineduck/goru
