@@ -118,14 +118,6 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		return float64(time.Now().UnixNano()) / 1e9, nil
 	})
 
-	kv := cfg.kvStore
-	if kv == nil {
-		kv = hostfunc.NewKVStore(cfg.kvOptions...)
-	}
-	registry.Register("kv_get", kv.Get)
-	registry.Register("kv_set", kv.Set)
-	registry.Register("kv_delete", kv.Delete)
-
 	if len(cfg.allowedHosts) > 0 {
 		httpHandler := hostfunc.NewHTTP(hostfunc.HTTPConfig{
 			AllowedHosts:   cfg.allowedHosts,

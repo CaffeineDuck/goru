@@ -38,3 +38,13 @@ func (r *Registry) List() []string {
 	}
 	return names
 }
+
+func (r *Registry) All() map[string]Func {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make(map[string]Func, len(r.funcs))
+	for name, fn := range r.funcs {
+		result[name] = fn
+	}
+	return result
+}

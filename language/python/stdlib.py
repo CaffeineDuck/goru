@@ -1,9 +1,5 @@
-import sys as _sys, json as _json, time as _time_module
+import sys as _sys, json as _json, time as _time_module, os as _os, asyncio as _asyncio_module
 from collections import deque as _deque
-
-# =============================================================================
-# Core: Host Function Protocol
-# =============================================================================
 
 def _goru_call(fn, args):
     _sys.stderr.write("\x00GORU:" + _json.dumps({"fn": fn, "args": args}) + "\x00")
@@ -118,37 +114,6 @@ def call(fn, **kwargs):
 async def async_call(fn, **kwargs):
     return await _async_call(fn, kwargs)
 
-# =============================================================================
-# kv - Key-Value Store
-# =============================================================================
-
-class _KVModule:
-    def get(self, key, *, default=None):
-        result = _goru_call("kv_get", {"key": key})
-        return result if result is not None else default
-
-    def set(self, key, value):
-        return _goru_call("kv_set", {"key": key, "value": value})
-
-    def delete(self, key):
-        return _goru_call("kv_delete", {"key": key})
-
-    async def async_get(self, key, *, default=None):
-        result = await _async_call("kv_get", {"key": key})
-        return result if result is not None else default
-
-    async def async_set(self, key, value):
-        return await _async_call("kv_set", {"key": key, "value": value})
-
-    async def async_delete(self, key):
-        return await _async_call("kv_delete", {"key": key})
-
-kv = _KVModule()
-
-# =============================================================================
-# http - HTTP Client
-# =============================================================================
-
 class HTTPResponse:
     def __init__(self, data):
         self._data = data
@@ -214,10 +179,6 @@ class _HTTPModule:
 
 http = _HTTPModule()
 
-# =============================================================================
-# fs - Filesystem
-# =============================================================================
-
 class _FSModule:
     def read_text(self, path):
         return _goru_call("fs_read", {"path": path})
@@ -273,18 +234,64 @@ class _FSModule:
 
 fs = _FSModule()
 
-# =============================================================================
-# time
-# =============================================================================
-
 def time_now():
     return _goru_call("time_now", {})
 
-_time_module.time = time_now
+_packages_path = _os.environ.get("PYTHONPATH")
+if _packages_path:
+    _sys.path.insert(0, _packages_path)
 
-# =============================================================================
-# Patches
-# =============================================================================
+def _apply_runtime_patches():
+    """Apply patches - now safe since asyncio is already imported at module level."""
+    _time_module.time = time_now
+    _asyncio_module.run = run_async
 
-import asyncio as _asyncio
-_asyncio.run = run_async
+def _session_loop():
+    _globals = {"__builtins__": __builtins__, "__name__": "__main__"}
+    _globals.update({
+        "call": call,
+        "async_call": async_call,
+        "run_async": run_async,
+        "http": http,
+        "fs": fs,
+        "HTTPResponse": HTTPResponse,
+    })
+
+    while True:
+        try:
+            line = _sys.stdin.readline()
+            if not line:
+                break
+
+            cmd = _json.loads(line.strip())
+            cmd_type = cmd.get("type", "")
+
+            if cmd_type == "exit":
+                break
+
+            if cmd_type == "exec":
+                code = cmd.get("code", "")
+                try:
+                    compiled = compile(code, "<session>", "exec")
+                    exec(compiled, _globals)
+                    _sys.stdout.flush()
+                    _sys.stderr.write("\x00GORU_DONE\x00")
+                    _sys.stderr.flush()
+                except Exception as e:
+                    _sys.stderr.write(f"\x00GORU_ERROR:{type(e).__name__}: {e}\x00")
+                    _sys.stderr.flush()
+
+        except EOFError:
+            break
+        except Exception:
+            break
+
+if globals().get("_GORU_SESSION_MODE") or _os.environ.get("GORU_SESSION") == "1":
+    _sys.stderr.write("\x00GORU_READY\x00")
+    _sys.stderr.flush()
+    _apply_runtime_patches()
+    _session_loop()
+else:
+    # Non-session mode: apply patches immediately for standalone execution
+    _time_module.time = time_now
+    _asyncio_module.run = run_async

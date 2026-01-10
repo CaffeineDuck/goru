@@ -99,14 +99,14 @@ func TestCallRequestJSON(t *testing.T) {
 	}{
 		{
 			name:    "sync call",
-			jsonStr: `{"fn":"kv_get","args":{"key":"test"}}`,
-			wantFn:  "kv_get",
+			jsonStr: `{"fn":"time_now","args":{}}`,
+			wantFn:  "time_now",
 			wantID:  "",
 		},
 		{
 			name:    "async call",
-			jsonStr: `{"id":"1","fn":"kv_set","args":{"key":"k","value":"v"}}`,
-			wantFn:  "kv_set",
+			jsonStr: `{"id":"1","fn":"http_request","args":{"method":"GET","url":"https://example.com"}}`,
+			wantFn:  "http_request",
 			wantID:  "1",
 		},
 		{

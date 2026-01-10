@@ -27,6 +27,8 @@ go get github.com/caffeineduck/goru
 
 ## Usage
 
+### Stateless Execution
+
 ```go
 package main
 
@@ -52,6 +54,24 @@ func main() {
     result = exec.Run(context.Background(), javascript.New(), `console.log("Hello from JS")`)
     fmt.Println(result.Output)
 }
+```
+
+### Sessions (Persistent State)
+
+Sessions keep the interpreter alive between executions, allowing variables and functions to persist:
+
+```go
+exec, _ := executor.New(hostfunc.NewRegistry())
+defer exec.Close()
+
+session, _ := exec.NewSession(python.New())
+defer session.Close()
+
+// State persists between runs
+session.Run(ctx, `x = 42`)
+session.Run(ctx, `def greet(name): return f"Hello, {name}!"`)
+result := session.Run(ctx, `print(greet("World"), x)`)
+// Output: Hello, World! 42
 ```
 
 ## Security Model
@@ -84,10 +104,6 @@ result := exec.Run(ctx, python.New(), code,
 **Host Functions**: Sandboxed code can call back into Go through controlled interfaces:
 
 ```python
-# Key-value store (always available)
-kv.set("user", "alice")
-print(kv.get("user"))
-
 # HTTP (requires WithAllowedHosts)
 resp = http.get("https://api.example.com/data")
 print(resp.json())
@@ -131,13 +147,18 @@ user = call("get_user", id="123")
 print(user["name"])  # Alice
 ```
 
-**CLI**: Run code from command line or as HTTP server:
+**CLI**: Run code from command line, REPL, or HTTP server:
 
 ```bash
 goru -c 'print(1+1)'                    # Python (default)
 goru -lang js -c 'console.log(1+1)'     # JavaScript
 goru script.py                          # From file
+goru repl                               # Interactive REPL with persistent state
 goru serve -port 8080                   # HTTP API server
+
+# Package management (Python only)
+goru deps install pydantic requests     # Install packages
+goru deps list                          # List installed packages
 ```
 
 ## Trade-offs
@@ -155,8 +176,8 @@ exec, _ := executor.New(registry, executor.WithDiskCache())
 ## Documentation
 
 - [API Reference](docs/api.md) - Go library usage
-- [Host Functions](docs/host-functions.md) - KV, HTTP, filesystem, custom functions
-- [CLI Reference](docs/cli.md) - Command-line and server mode
+- [Host Functions](docs/host-functions.md) - HTTP, filesystem, custom functions
+- [CLI Reference](docs/cli.md) - Command-line, REPL, and server mode
 - [Languages](docs/languages.md) - Python/JS specifics and limitations
 
 ## License

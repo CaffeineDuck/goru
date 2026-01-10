@@ -36,3 +36,8 @@ func (j *JavaScript) WrapCode(code string) string {
 func (j *JavaScript) Args(wrappedCode string) []string {
 	return []string{"qjs", "--std", "-e", wrappedCode}
 }
+
+// SessionInit returns code to set session mode flag for JavaScript.
+func (j *JavaScript) SessionInit() string {
+	return "globalThis._GORU_SESSION_MODE = true;\n"
+}

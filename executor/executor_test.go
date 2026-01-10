@@ -64,19 +64,6 @@ func TestPythonComputation(t *testing.T) {
 	}
 }
 
-func TestPythonKVHostFunction(t *testing.T) {
-	result := sharedExec.Run(context.Background(), sharedLang, `
-kv.set("key", "value")
-print(kv.get("key"))
-`)
-	if result.Error != nil {
-		t.Fatalf("unexpected error: %v", result.Error)
-	}
-	if strings.TrimSpace(result.Output) != "value" {
-		t.Errorf("expected 'value', got %q", result.Output)
-	}
-}
-
 func TestPythonCustomHostFunction(t *testing.T) {
 	// This test needs its own executor because it registers a custom function
 	registry := hostfunc.NewRegistry()
@@ -118,20 +105,6 @@ while True:
 	}
 	if !strings.Contains(result.Error.Error(), "timeout") {
 		t.Errorf("expected timeout error, got %v", result.Error)
-	}
-}
-
-func TestExecutorSharedKVStore(t *testing.T) {
-	kv := hostfunc.NewKVStore()
-
-	// First run: set value
-	sharedExec.Run(context.Background(), sharedLang, `kv.set("shared", "across-runs")`, executor.WithKVStore(kv))
-
-	// Second run: get value
-	result := sharedExec.Run(context.Background(), sharedLang, `print(kv.get("shared"))`, executor.WithKVStore(kv))
-
-	if strings.TrimSpace(result.Output) != "across-runs" {
-		t.Errorf("expected 'across-runs', got %q", result.Output)
 	}
 }
 
@@ -256,61 +229,6 @@ print(",".join(names))
 // ASYNC TESTS
 // =============================================================================
 
-func TestPythonAsyncKV(t *testing.T) {
-	result := sharedExec.Run(context.Background(), sharedLang, `
-import asyncio
-
-async def main():
-    await kv.async_set("async_a", "value_a")
-    await kv.async_set("async_b", "value_b")
-    results = await asyncio.gather(
-        kv.async_get("async_a"),
-        kv.async_get("async_b")
-    )
-    return results
-
-result = run_async(main())
-print(",".join(result))
-`)
-	if result.Error != nil {
-		t.Fatalf("unexpected error: %v", result.Error)
-	}
-	if strings.TrimSpace(result.Output) != "value_a,value_b" {
-		t.Errorf("expected 'value_a,value_b', got %q", result.Output)
-	}
-}
-
-func TestPythonAsyncBatching(t *testing.T) {
-	// Test that multiple async calls are batched together
-	result := sharedExec.Run(context.Background(), sharedLang, `
-import asyncio
-
-# Set up data
-for i in range(5):
-    kv.set(f"batch_{i}", str(i * 10))
-
-async def main():
-    # These should be batched into a single FLUSH
-    results = await asyncio.gather(
-        kv.async_get("batch_0"),
-        kv.async_get("batch_1"),
-        kv.async_get("batch_2"),
-        kv.async_get("batch_3"),
-        kv.async_get("batch_4")
-    )
-    return results
-
-result = run_async(main())
-print(",".join(result))
-`)
-	if result.Error != nil {
-		t.Fatalf("unexpected error: %v", result.Error)
-	}
-	if strings.TrimSpace(result.Output) != "0,10,20,30,40" {
-		t.Errorf("expected '0,10,20,30,40', got %q", result.Output)
-	}
-}
-
 func TestPythonTimeNow(t *testing.T) {
 	result := sharedExec.Run(context.Background(), sharedLang, `
 import time
@@ -388,47 +306,3 @@ func TestConcurrentRuns(t *testing.T) {
 	}
 }
 
-func TestConcurrentRunsWithSharedKV(t *testing.T) {
-	kv := hostfunc.NewKVStore()
-	const numGoroutines = 10
-	var wg sync.WaitGroup
-	wg.Add(numGoroutines)
-
-	errors := make(chan error, numGoroutines)
-
-	for i := range numGoroutines {
-		go func(id int) {
-			defer wg.Done()
-			code := `
-kv.set("counter_` + string(rune('a'+id)) + `", "done")
-print("ok")
-`
-			result := sharedExec.Run(context.Background(), sharedLang, code, executor.WithKVStore(kv))
-			if result.Error != nil {
-				errors <- result.Error
-				return
-			}
-			if strings.TrimSpace(result.Output) != "ok" {
-				errors <- result.Error
-			}
-		}(i)
-	}
-
-	wg.Wait()
-	close(errors)
-
-	for err := range errors {
-		if err != nil {
-			t.Errorf("concurrent run with shared KV failed: %v", err)
-		}
-	}
-
-	// Verify all writes succeeded
-	for i := range numGoroutines {
-		key := "counter_" + string(rune('a'+i))
-		val, _ := kv.Get(context.Background(), map[string]any{"key": key})
-		if val != "done" {
-			t.Errorf("expected kv[%s]='done', got %v", key, val)
-		}
-	}
-}

@@ -19,4 +19,8 @@ type Language interface {
 	// For Python: []string{"python", "-c", code}
 	// For QuickJS: []string{"qjs", "--std", "-e", code}
 	Args(wrappedCode string) []string
+
+	// SessionInit returns code to inject before stdlib for session mode.
+	// This code sets a flag that the stdlib checks to enter session loop.
+	SessionInit() string
 }

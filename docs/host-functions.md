@@ -4,36 +4,6 @@ Host functions let sandboxed code call back into Go. They're the only way sandbo
 
 ## Built-in Modules
 
-### kv - Key-Value Store
-
-Always available. In-memory key-value storage.
-
-**Python:**
-```python
-kv.set("key", "value")
-kv.get("key")                    # returns "value" or None
-kv.get("key", default="fallback")  # returns "fallback" if not found
-kv.delete("key")
-
-# Async
-await kv.async_set("key", "value")
-await kv.async_get("key")
-await kv.async_delete("key")
-```
-
-**JavaScript:**
-```javascript
-kv.set("key", "value");
-kv.get("key");              // returns "value" or null
-kv.get("key", "fallback");  // returns "fallback" if not found
-kv.delete("key");
-
-// Async
-await kv.asyncSet("key", "value");
-await kv.asyncGet("key");
-await kv.asyncDelete("key");
-```
-
 ### http - HTTP Client
 
 Requires `WithAllowedHosts`. Supports all HTTP methods with headers and body.

@@ -29,9 +29,6 @@ goru run [options] [file]
 | `-allow-host` | Allow HTTP host (repeatable) | - |
 | `-mount` | Mount spec (repeatable) | - |
 | `-no-cache` | Disable disk cache | false |
-| `-kv-max-key` | Max KV key size | 1024 |
-| `-kv-max-value` | Max KV value size | 1048576 |
-| `-kv-max-entries` | Max KV entries | 10000 |
 | `-http-max-url` | Max HTTP URL length | 8192 |
 | `-http-max-body` | Max HTTP response body | 1048576 |
 | `-fs-max-file` | Max file read size | 10485760 |
@@ -54,8 +51,35 @@ echo 'print("hello")' | goru
 
 # With options
 goru -timeout 5s -c 'while True: pass'
-goru -allow-host api.example.com -c 'print(http_get("https://api.example.com/data"))'
-goru -mount /data:./input:ro -c 'print(fs_read("/data/config.json"))'
+goru -allow-host api.example.com -c 'print(http.get("https://api.example.com/data"))'
+goru -mount /data:./input:ro -c 'print(fs.read_text("/data/config.json"))'
+```
+
+### repl
+
+Interactive REPL with persistent state.
+
+```bash
+goru repl [options]
+```
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-lang` | Language (python, js) | python |
+| `-packages` | Path to packages directory (Python only) | - |
+| `-no-cache` | Disable disk cache | false |
+
+**Example:**
+
+```bash
+goru repl
+>>> x = 42
+>>> def greet(name): return f"Hello, {name}!"
+>>> print(greet("World"), x)
+Hello, World! 42
+>>> exit
 ```
 
 ### serve
@@ -73,27 +97,32 @@ goru serve [options]
 | `-port` | Listen port | 8080 |
 | `-lang` | Default language | python |
 | `-timeout` | Default timeout | 30s |
-| `-session-ttl` | Session expiry | 1h |
 | `-allow-host` | Allow HTTP host (repeatable) | - |
 | `-mount` | Mount spec (repeatable) | - |
 | `-no-cache` | Disable disk cache | false |
-| `-kv-max-key` | Max KV key size | 1024 |
-| `-kv-max-value` | Max KV value size | 1048576 |
-| `-kv-max-entries` | Max KV entries | 10000 |
 | `-http-max-url` | Max HTTP URL length | 8192 |
 | `-http-max-body` | Max HTTP response body | 1048576 |
 | `-fs-max-file` | Max file read size | 10485760 |
 | `-fs-max-write` | Max file write size | 10485760 |
 | `-fs-max-path` | Max path length | 4096 |
 
-**API:**
+**API Endpoints:**
+
+```
+POST /execute        Execute code (stateless)
+POST /sessions       Create a new session
+POST /sessions/{id}/exec  Execute code in session
+DELETE /sessions/{id}     Close session
+GET /health          Health check
+```
+
+**Stateless Execution:**
 
 ```
 POST /execute
 {
   "code": "print(1+1)",
   "lang": "python",        // optional, uses server default
-  "session_id": "user-1",  // optional, for KV persistence
   "timeout": "5s"          // optional, overrides server default
 }
 
@@ -105,9 +134,21 @@ Response:
 }
 ```
 
-```
-GET /health
-Response: ok
+**Session-based Execution (persistent state):**
+
+```bash
+# Create session
+curl -X POST localhost:8080/sessions -d '{"lang": "python"}'
+# Response: {"session_id": "abc123..."}
+
+# Execute code (state persists)
+curl -X POST localhost:8080/sessions/abc123/exec \
+  -d '{"code": "x = 42"}'
+curl -X POST localhost:8080/sessions/abc123/exec \
+  -d '{"code": "print(x)"}'  # Output: 42
+
+# Close session
+curl -X DELETE localhost:8080/sessions/abc123
 ```
 
 **Example:**
@@ -116,17 +157,54 @@ Response: ok
 # Start server
 goru serve -port 8080 -allow-host httpbin.org
 
-# Execute code
+# Stateless execution
 curl -X POST localhost:8080/execute \
   -H "Content-Type: application/json" \
   -d '{"code": "print(1+1)"}'
-
-# With session (KV persists across requests)
-curl -X POST localhost:8080/execute \
-  -d '{"code": "kv_set(\"x\", \"hello\")", "session_id": "user-1"}'
-curl -X POST localhost:8080/execute \
-  -d '{"code": "print(kv_get(\"x\"))", "session_id": "user-1"}'
 ```
+
+### deps
+
+Manage Python packages for sandboxed code.
+
+```bash
+goru deps <command> [options]
+```
+
+**Commands:**
+
+| Command | Description |
+|---------|-------------|
+| `install <packages...>` | Install packages to .goru/packages |
+| `list` | List installed packages |
+| `remove <packages...>` | Remove packages |
+| `cache clear` | Clear download cache |
+
+**Options:**
+
+| Flag | Description | Default |
+|------|-------------|---------|
+| `-dir` | Package directory | .goru/packages |
+
+**Examples:**
+
+```bash
+# Install packages
+goru deps install pydantic requests
+
+# List installed
+goru deps list
+
+# Remove package
+goru deps remove pydantic
+
+# Use with REPL
+goru deps install pydantic
+goru repl -packages .goru/packages
+>>> from pydantic import BaseModel
+```
+
+Note: JavaScript packages are not supported. Use bundling for JS.
 
 ## Mount Syntax
 

@@ -1,7 +1,3 @@
-// =============================================================================
-// Core: Host Function Protocol
-// =============================================================================
-
 const _goru_call = (fn, args) => {
   std.err.puts("\x00GORU:" + JSON.stringify({fn, args}) + "\x00");
   std.err.flush();
@@ -58,42 +54,6 @@ const runAsync = async (...promises) => {
 
 const call = (fn, args) => _goru_call(fn, args || {});
 const asyncCall = (fn, args) => _asyncCall(fn, args || {});
-
-// =============================================================================
-// kv - Key-Value Store
-// =============================================================================
-
-const kv = {
-  get(key, defaultValue = null) {
-    const result = _goru_call("kv_get", {key});
-    return result !== null ? result : defaultValue;
-  },
-
-  set(key, value) {
-    return _goru_call("kv_set", {key, value});
-  },
-
-  delete(key) {
-    return _goru_call("kv_delete", {key});
-  },
-
-  async asyncGet(key, defaultValue = null) {
-    const result = await _asyncCall("kv_get", {key});
-    return result !== null ? result : defaultValue;
-  },
-
-  async asyncSet(key, value) {
-    return await _asyncCall("kv_set", {key, value});
-  },
-
-  async asyncDelete(key) {
-    return await _asyncCall("kv_delete", {key});
-  }
-};
-
-// =============================================================================
-// http - HTTP Client
-// =============================================================================
 
 class HTTPResponse {
   constructor(data) {
@@ -170,10 +130,6 @@ const http = {
   }
 };
 
-// =============================================================================
-// fs - Filesystem
-// =============================================================================
-
 const fs = {
   readText(path) {
     return _goru_call("fs_read", {path});
@@ -246,8 +202,41 @@ const fs = {
   }
 };
 
-// =============================================================================
-// time
-// =============================================================================
-
 const time_now = () => _goru_call("time_now", {});
+
+const _sessionLoop = () => {
+  while (true) {
+    const line = std.in.getline();
+    if (line === null) break;
+
+    try {
+      const cmd = JSON.parse(line);
+
+      if (cmd.type === "exit") {
+        break;
+      }
+
+      if (cmd.type === "exec") {
+        try {
+          const result = std.evalScript(cmd.code);
+          if (result !== undefined) {
+            console.log(result);
+          }
+          std.err.puts("\x00GORU_DONE\x00");
+          std.err.flush();
+        } catch (e) {
+          std.err.puts("\x00GORU_ERROR:" + e.name + ": " + e.message + "\x00");
+          std.err.flush();
+        }
+      }
+    } catch (e) {
+      break;
+    }
+  }
+};
+
+if (globalThis._GORU_SESSION_MODE || std.getenv("GORU_SESSION") === "1") {
+  std.err.puts("\x00GORU_READY\x00");
+  std.err.flush();
+  _sessionLoop();
+}

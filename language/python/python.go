@@ -38,3 +38,8 @@ func (p *Python) WrapCode(code string) string {
 func (p *Python) Args(wrappedCode string) []string {
 	return []string{"python", "-c", wrappedCode}
 }
+
+// SessionInit returns code to set session mode flag for Python.
+func (p *Python) SessionInit() string {
+	return "_GORU_SESSION_MODE = True\n"
+}

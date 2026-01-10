@@ -47,49 +47,6 @@ console.log(sum);
 	}
 }
 
-func TestJavaScriptKVHostFunction(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), New(), `
-kv.set("key", "value");
-console.log(kv.get("key"));
-`)
-	if result.Error != nil {
-		t.Fatalf("unexpected error: %v", result.Error)
-	}
-	if strings.TrimSpace(result.Output) != "value" {
-		t.Errorf("expected 'value', got %q", result.Output)
-	}
-}
-
-func TestJavaScriptMultipleHostCalls(t *testing.T) {
-	registry := hostfunc.NewRegistry()
-	exec, err := executor.New(registry)
-	if err != nil {
-		t.Fatalf("failed to create executor: %v", err)
-	}
-	defer exec.Close()
-
-	result := exec.Run(context.Background(), New(), `
-for (let i = 0; i < 3; i++) {
-    kv.set("k" + i, "v" + i);
-}
-const values = [0,1,2].map(i => kv.get("k" + i)).join(",");
-console.log(values);
-`)
-	if result.Error != nil {
-		t.Fatalf("unexpected error: %v", result.Error)
-	}
-	if strings.TrimSpace(result.Output) != "v0,v1,v2" {
-		t.Errorf("expected 'v0,v1,v2', got %q", result.Output)
-	}
-}
-
 func TestJavaScriptTimeout(t *testing.T) {
 	registry := hostfunc.NewRegistry()
 	exec, err := executor.New(registry)

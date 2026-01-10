@@ -12,9 +12,7 @@ type Option func(*runConfig)
 type runConfig struct {
 	timeout          time.Duration
 	allowedHosts     []string
-	kvStore          *hostfunc.KVStore
 	mounts           []hostfunc.Mount
-	kvOptions        []hostfunc.KVOption
 	httpMaxURLLength int
 	httpMaxBodySize  int64
 	httpTimeout      time.Duration
@@ -38,13 +36,6 @@ func WithTimeout(d time.Duration) Option {
 func WithAllowedHosts(hosts []string) Option {
 	return func(c *runConfig) {
 		c.allowedHosts = hosts
-	}
-}
-
-// WithKVStore provides a custom KV store for persistence across runs.
-func WithKVStore(kv *hostfunc.KVStore) Option {
-	return func(c *runConfig) {
-		c.kvStore = kv
 	}
 }
 
@@ -74,27 +65,6 @@ func WithMount(virtualPath, hostPath string, mode hostfunc.MountMode) Option {
 }
 
 // Security limit options
-
-// WithKVMaxKeySize sets the maximum key size for KV store operations.
-func WithKVMaxKeySize(size int) Option {
-	return func(c *runConfig) {
-		c.kvOptions = append(c.kvOptions, hostfunc.WithMaxKeySize(size))
-	}
-}
-
-// WithKVMaxValueSize sets the maximum value size for KV store operations.
-func WithKVMaxValueSize(size int) Option {
-	return func(c *runConfig) {
-		c.kvOptions = append(c.kvOptions, hostfunc.WithMaxValueSize(size))
-	}
-}
-
-// WithKVMaxEntries sets the maximum number of entries in the KV store.
-func WithKVMaxEntries(n int) Option {
-	return func(c *runConfig) {
-		c.kvOptions = append(c.kvOptions, hostfunc.WithMaxEntries(n))
-	}
-}
 
 // WithHTTPMaxURLLength sets the maximum URL length for HTTP requests.
 func WithHTTPMaxURLLength(size int) Option {
