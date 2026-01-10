@@ -1,8 +1,9 @@
 # Binary
 /goru
 
-# Large WASM files (download via script)
-sandbox/python.wasm
+# WASM runtimes (downloaded via go generate)
+language/python/python.wasm
+language/javascript/javascript.wasm
 
 # Package directory (installed via goru deps)
 .goru/

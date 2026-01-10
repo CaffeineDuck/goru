@@ -5,6 +5,8 @@ import (
 	_ "embed"
 )
 
+//go:generate go run ../../internal/tools/download https://github.com/vmware-labs/webassembly-language-runtimes/releases/download/python%2F3.12.0%2B20231211-040d5a6/python-3.12.0.wasm python.wasm
+
 //go:embed python.wasm
 var wasmModule []byte
 

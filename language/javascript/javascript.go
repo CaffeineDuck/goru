@@ -2,29 +2,28 @@ package javascript
 
 import (
 	_ "embed"
-
-	quickjswasi "github.com/paralin/go-quickjs-wasi"
 )
+
+//go:generate go run ../../internal/tools/download https://github.com/quickjs-ng/quickjs/releases/download/v0.11.0/qjs-wasi.wasm javascript.wasm
+
+//go:embed javascript.wasm
+var wasmModule []byte
 
 //go:embed stdlib.js
 var stdlib string
 
-// JavaScript implements the executor.Language interface for JavaScript execution.
 type JavaScript struct{}
 
-// New returns a JavaScript language adapter.
 func New() *JavaScript {
 	return &JavaScript{}
 }
 
-// Name returns "javascript".
 func (j *JavaScript) Name() string {
 	return "javascript"
 }
 
-// Module returns the QuickJS WASM binary.
 func (j *JavaScript) Module() []byte {
-	return quickjswasi.QuickJSWASM
+	return wasmModule
 }
 
 // WrapCode prepends the goru stdlib to user code.
