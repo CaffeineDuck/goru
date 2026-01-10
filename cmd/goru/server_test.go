@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -324,5 +326,64 @@ func TestREPLImports(t *testing.T) {
 
 	if !strings.Contains(result.Output, `"key"`) {
 		t.Errorf("expected JSON output, got %q", result.Output)
+	}
+}
+
+// --- Deps Command Tests ---
+
+func TestDepsList(t *testing.T) {
+	dir := t.TempDir()
+
+	// Empty dir
+	depsList(dir) // Should print "No packages installed."
+
+	// Create fake packages
+	os.MkdirAll(filepath.Join(dir, "requests"), 0755)
+	os.MkdirAll(filepath.Join(dir, "pydantic"), 0755)
+	os.MkdirAll(filepath.Join(dir, "__pycache__"), 0755)
+	os.MkdirAll(filepath.Join(dir, "requests-2.28.0.dist-info"), 0755)
+
+	// Should list packages (excluding __pycache__ and .dist-info)
+	depsList(dir) // Should print requests, pydantic
+}
+
+func TestDepsRemove(t *testing.T) {
+	dir := t.TempDir()
+
+	// Create fake package
+	pkgDir := filepath.Join(dir, "requests")
+	distInfo := filepath.Join(dir, "requests-2.28.0.dist-info")
+	os.MkdirAll(pkgDir, 0755)
+	os.MkdirAll(distInfo, 0755)
+
+	// Remove it
+	depsRemove(dir, []string{"requests"})
+
+	// Verify both dirs are gone
+	if _, err := os.Stat(pkgDir); !os.IsNotExist(err) {
+		t.Error("package dir should be removed")
+	}
+	if _, err := os.Stat(distInfo); !os.IsNotExist(err) {
+		t.Error("dist-info dir should be removed")
+	}
+}
+
+func TestDepsCacheClear(t *testing.T) {
+	// Create temp .goru/cache
+	origDir, _ := os.Getwd()
+	tmpDir := t.TempDir()
+	os.Chdir(tmpDir)
+	defer os.Chdir(origDir)
+
+	cacheDir := filepath.Join(".goru", "cache")
+	os.MkdirAll(cacheDir, 0755)
+	os.WriteFile(filepath.Join(cacheDir, "test.whl"), []byte("test"), 0644)
+
+	// Clear cache
+	depsCacheClear()
+
+	// Verify cache is gone
+	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
+		t.Error("cache dir should be removed")
 	}
 }

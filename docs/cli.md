@@ -175,7 +175,7 @@ goru deps <command> [options]
 
 | Command | Description |
 |---------|-------------|
-| `install <packages...>` | Install packages to .goru/packages |
+| `install <packages...>` | Install packages to .goru/python/packages |
 | `list` | List installed packages |
 | `remove <packages...>` | Remove packages |
 | `cache clear` | Clear download cache |
@@ -184,7 +184,7 @@ goru deps <command> [options]
 
 | Flag | Description | Default |
 |------|-------------|---------|
-| `-dir` | Package directory | .goru/packages |
+| `-dir` | Package directory | .goru/python/packages |
 
 **Examples:**
 
@@ -200,7 +200,7 @@ goru deps remove pydantic
 
 # Use with REPL
 goru deps install pydantic
-goru repl -packages .goru/packages
+goru repl -packages .goru/python/packages
 >>> from pydantic import BaseModel
 ```
 

@@ -3,3 +3,6 @@
 
 # Large WASM files (download via script)
 sandbox/python.wasm
+
+# Package directory (installed via goru deps)
+.goru/

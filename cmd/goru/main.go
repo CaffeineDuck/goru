@@ -348,13 +348,13 @@ const depsUsage = `goru deps - Manage Python packages for sandboxed code
 Note: JavaScript packages not supported. Use bundling for JS.
 
 Usage:
-  goru deps install <packages...>    Install packages to .goru/packages
+  goru deps install <packages...>    Install packages to .goru/python/packages
   goru deps list                     List installed packages
   goru deps remove <packages...>     Remove packages
   goru deps cache clear              Clear download cache
 
 Options:
-  -dir string    Package directory (default ".goru/packages")
+  -dir string    Package directory (default ".goru/python/packages")
 
 Examples:
   goru deps install pydantic requests
@@ -370,7 +370,7 @@ func depsCmd(args []string) {
 
 	fs := flag.NewFlagSet("deps", flag.ExitOnError)
 	fs.Usage = func() { fmt.Print(depsUsage) }
-	pkgDir := fs.String("dir", ".goru/packages", "Package directory")
+	pkgDir := fs.String("dir", ".goru/python/packages", "Package directory")
 
 	subCmd := args[0]
 	args = args[1:]
