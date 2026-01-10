@@ -308,7 +308,10 @@ func (s *Session) Run(ctx context.Context, code string) Result {
 	s.protocol.ResetExec()
 
 	cmd := execCommand{Type: "exec", Code: code}
-	cmdBytes, _ := json.Marshal(cmd)
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return Result{Error: fmt.Errorf("marshal command: %w", err), Duration: time.Since(start)}
+	}
 	cmdBytes = append(cmdBytes, '\n')
 
 	if _, err := s.stdin.Write(cmdBytes); err != nil {

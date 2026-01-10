@@ -5,6 +5,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strings"
@@ -135,7 +136,29 @@ func (h *HTTP) Request(ctx context.Context, args map[string]any) (any, error) {
 }
 
 func (h *HTTP) isHostAllowed(host string) bool {
+	// Normalize host IP if it's an IP address
+	hostIP := net.ParseIP(host)
+
 	for _, allowed := range h.cfg.AllowedHosts {
+		allowedIP := net.ParseIP(allowed)
+
+		// Both are IPs - compare normalized forms
+		if hostIP != nil && allowedIP != nil {
+			if hostIP.Equal(allowedIP) {
+				return true
+			}
+			continue
+		}
+
+		// Host is IP but allowed is domain (or vice versa) - no match possible via subdomain
+		if hostIP != nil || allowedIP != nil {
+			if host == allowed {
+				return true
+			}
+			continue
+		}
+
+		// Both are domain names - exact match or subdomain match
 		if host == allowed || strings.HasSuffix(host, "."+allowed) {
 			return true
 		}

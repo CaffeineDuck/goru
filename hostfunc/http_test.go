@@ -117,3 +117,62 @@ func TestHTTPGetDefaultMaxURLLength(t *testing.T) {
 		t.Errorf("expected 'url exceeds max length' error, got %v", err)
 	}
 }
+
+func TestHTTPGetIPv6Normalization(t *testing.T) {
+	h := NewHTTP(HTTPConfig{AllowedHosts: []string{"::1"}})
+
+	tests := []struct {
+		host    string
+		allowed bool
+	}{
+		{"::1", true},
+		{"0:0:0:0:0:0:0:1", true}, // expanded form
+		{"::2", false},
+		{"example.com", false}, // domain shouldn't match IP
+	}
+
+	for _, tc := range tests {
+		got := h.isHostAllowed(tc.host)
+		if got != tc.allowed {
+			t.Errorf("isHostAllowed(%q) = %v, want %v", tc.host, got, tc.allowed)
+		}
+	}
+}
+
+func TestHTTPGetIPv6NoSubdomainBypass(t *testing.T) {
+	h := NewHTTP(HTTPConfig{AllowedHosts: []string{"example.com"}})
+
+	// IP addresses should not match domain allowlists via subdomain logic
+	tests := []string{
+		"::1",
+		"127.0.0.1",
+		"192.168.1.1",
+		"2001:db8::1",
+	}
+
+	for _, host := range tests {
+		if h.isHostAllowed(host) {
+			t.Errorf("IP %q should not match domain allowlist", host)
+		}
+	}
+}
+
+func TestHTTPGetIPv4Matching(t *testing.T) {
+	h := NewHTTP(HTTPConfig{AllowedHosts: []string{"192.168.1.1"}})
+
+	tests := []struct {
+		host    string
+		allowed bool
+	}{
+		{"192.168.1.1", true},
+		{"192.168.1.2", false},
+		{"example.com", false},
+	}
+
+	for _, tc := range tests {
+		got := h.isHostAllowed(tc.host)
+		if got != tc.allowed {
+			t.Errorf("isHostAllowed(%q) = %v, want %v", tc.host, got, tc.allowed)
+		}
+	}
+}

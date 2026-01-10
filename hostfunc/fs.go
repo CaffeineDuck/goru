@@ -217,16 +217,30 @@ func (f *FS) Write(ctx context.Context, args map[string]any) (any, error) {
 		return nil, err
 	}
 
-	// Check if file exists for MountReadWrite (can't create new files)
-	if _, statErr := os.Stat(hostPath); os.IsNotExist(statErr) {
-		// Check if mount allows creation
-		mount := f.findMount(path)
-		if mount == nil || mount.Mode != MountReadWriteCreate {
-			return nil, errors.New("permission denied: cannot create new files")
-		}
+	mount := f.findMount(path)
+	if mount == nil {
+		return nil, errors.New("permission denied: path not in any mount")
 	}
 
-	if err := os.WriteFile(hostPath, []byte(content), 0644); err != nil {
+	// Use atomic file flags to avoid TOCTOU race conditions
+	var flags int
+	if mount.Mode == MountReadWriteCreate {
+		flags = os.O_WRONLY | os.O_CREATE | os.O_TRUNC
+	} else {
+		// MountReadWrite: only allow writing to existing files
+		flags = os.O_WRONLY | os.O_TRUNC
+	}
+
+	file, err := os.OpenFile(hostPath, flags, 0644)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil, errors.New("permission denied: cannot create new files")
+		}
+		return nil, fmt.Errorf("write: %w", err)
+	}
+	defer file.Close()
+
+	if _, err := file.Write([]byte(content)); err != nil {
 		return nil, fmt.Errorf("write: %w", err)
 	}
 
