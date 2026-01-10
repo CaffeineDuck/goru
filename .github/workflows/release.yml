@@ -5,6 +5,9 @@ on:
     tags:
       - 'v*'
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -43,7 +46,7 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: goru-${{ matrix.goos }}-${{ matrix.goarch }}
-          path: goru*
+          path: goru-${{ matrix.goos }}-${{ matrix.goarch }}*
 
   release:
     needs: build
@@ -51,11 +54,11 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: '*'
+          path: artifacts
           merge-multiple: true
 
       - name: Create Release
         uses: softprops/action-gh-release@v1
         with:
-          files: goru*
+          files: artifacts/*
           generate_release_notes: true
