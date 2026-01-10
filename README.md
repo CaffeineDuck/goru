@@ -150,7 +150,7 @@ results = await asyncio.gather(
 - [CLI Reference](docs/cli.md)
 - [Go API](docs/api.md)
 - [Host Functions](docs/host-functions.md)
-- [Language Details](docs/languages.md)
+- [Python](docs/python.md) | [JavaScript](docs/javascript.md)
 
 ## License
 
