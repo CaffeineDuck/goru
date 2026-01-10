@@ -101,7 +101,7 @@ By default, sandboxed code can do nothing dangerous:
 | Filesystem | Blocked | `WithMount("/data", "./input", MountReadOnly)` |
 | Network | Blocked | `WithAllowedHosts([]string{"api.example.com"})` |
 | KV Store | Blocked | `WithKV()` |
-| Package Install | Blocked | `WithAllowedPackages([]string{"requests"})` |
+| Package Install | Blocked | `WithAllowedPackages([]string{"requests>=2.32"})` |
 | Memory | 256MB | `WithMemoryLimit(executor.MemoryLimit64MB)` |
 | System calls | Blocked | N/A (WASM has no syscalls) |
 
