@@ -5,8 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
-	"os"
-	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -66,7 +64,8 @@ func TestCreateSession(t *testing.T) {
 			lang = "python"
 		}
 
-		sessionID, err := sessions.create(exec, getLanguage(lang, ""))
+		language, _ := getLanguage(lang, "")
+		sessionID, err := sessions.create(exec, language)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
@@ -100,7 +99,6 @@ func TestSessionExecution(t *testing.T) {
 	exec, sessions, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	// Create a session
 	sessionID, err := sessions.create(exec, python.New())
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
@@ -111,13 +109,11 @@ func TestSessionExecution(t *testing.T) {
 		t.Fatal("session not found after creation")
 	}
 
-	// Execute code
 	result := session.Run(t.Context(), `x = 42`)
 	if result.Error != nil {
 		t.Fatalf("first run failed: %v", result.Error)
 	}
 
-	// Verify state persists
 	result = session.Run(t.Context(), `print(x)`)
 	if result.Error != nil {
 		t.Fatalf("second run failed: %v", result.Error)
@@ -132,31 +128,26 @@ func TestSessionClose(t *testing.T) {
 	exec, sessions, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	// Create a session
 	sessionID, err := sessions.create(exec, python.New())
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}
 
-	// Verify it exists
 	_, ok := sessions.get(sessionID)
 	if !ok {
 		t.Fatal("session not found after creation")
 	}
 
-	// Close it
 	closed := sessions.close(sessionID)
 	if !closed {
 		t.Error("expected close to return true")
 	}
 
-	// Verify it's gone
 	_, ok = sessions.get(sessionID)
 	if ok {
 		t.Error("session should not exist after close")
 	}
 
-	// Close again should return false
 	closed = sessions.close(sessionID)
 	if closed {
 		t.Error("expected close to return false for non-existent session")
@@ -177,7 +168,6 @@ func TestMultipleSessions(t *testing.T) {
 	exec, sessions, cleanup := setupTestServer(t)
 	defer cleanup()
 
-	// Create two sessions
 	id1, err := sessions.create(exec, python.New())
 	if err != nil {
 		t.Fatalf("failed to create session 1: %v", err)
@@ -195,11 +185,9 @@ func TestMultipleSessions(t *testing.T) {
 	session1, _ := sessions.get(id1)
 	session2, _ := sessions.get(id2)
 
-	// Set different values in each session
 	session1.Run(t.Context(), `x = "session1"`)
 	session2.Run(t.Context(), `x = "session2"`)
 
-	// Verify isolation
 	result1 := session1.Run(t.Context(), `print(x)`)
 	result2 := session2.Run(t.Context(), `print(x)`)
 
@@ -212,10 +200,7 @@ func TestMultipleSessions(t *testing.T) {
 	}
 }
 
-// --- REPL Integration Tests ---
-
 func TestREPLSessionWorkflow(t *testing.T) {
-	// Tests the same workflow as REPL: create session, run multiple commands
 	registry := hostfunc.NewRegistry()
 	exec, err := executor.New(registry)
 	if err != nil {
@@ -229,11 +214,10 @@ func TestREPLSessionWorkflow(t *testing.T) {
 	}
 	defer session.Close()
 
-	// Simulate REPL commands
 	commands := []struct {
-		code     string
-		wantErr  bool
-		wantOut  string
+		code    string
+		wantErr bool
+		wantOut string
 	}{
 		{`x = 10`, false, ""},
 		{`y = 20`, false, ""},
@@ -272,7 +256,6 @@ func TestREPLMultilineCode(t *testing.T) {
 	}
 	defer session.Close()
 
-	// Define a multi-line function
 	result := session.Run(t.Context(), `
 def fibonacci(n):
     if n <= 1:
@@ -283,7 +266,6 @@ def fibonacci(n):
 		t.Fatalf("failed to define function: %v", result.Error)
 	}
 
-	// Use it
 	result = session.Run(t.Context(), `print(fibonacci(10))`)
 	if result.Error != nil {
 		t.Fatalf("failed to call function: %v", result.Error)
@@ -308,7 +290,6 @@ func TestREPLImports(t *testing.T) {
 	}
 	defer session.Close()
 
-	// Import persists
 	result := session.Run(t.Context(), `import json`)
 	if result.Error != nil {
 		t.Fatalf("import failed: %v", result.Error)
@@ -326,64 +307,5 @@ func TestREPLImports(t *testing.T) {
 
 	if !strings.Contains(result.Output, `"key"`) {
 		t.Errorf("expected JSON output, got %q", result.Output)
-	}
-}
-
-// --- Deps Command Tests ---
-
-func TestDepsList(t *testing.T) {
-	dir := t.TempDir()
-
-	// Empty dir
-	depsList(dir) // Should print "No packages installed."
-
-	// Create fake packages
-	os.MkdirAll(filepath.Join(dir, "requests"), 0755)
-	os.MkdirAll(filepath.Join(dir, "pydantic"), 0755)
-	os.MkdirAll(filepath.Join(dir, "__pycache__"), 0755)
-	os.MkdirAll(filepath.Join(dir, "requests-2.28.0.dist-info"), 0755)
-
-	// Should list packages (excluding __pycache__ and .dist-info)
-	depsList(dir) // Should print requests, pydantic
-}
-
-func TestDepsRemove(t *testing.T) {
-	dir := t.TempDir()
-
-	// Create fake package
-	pkgDir := filepath.Join(dir, "requests")
-	distInfo := filepath.Join(dir, "requests-2.28.0.dist-info")
-	os.MkdirAll(pkgDir, 0755)
-	os.MkdirAll(distInfo, 0755)
-
-	// Remove it
-	depsRemove(dir, []string{"requests"})
-
-	// Verify both dirs are gone
-	if _, err := os.Stat(pkgDir); !os.IsNotExist(err) {
-		t.Error("package dir should be removed")
-	}
-	if _, err := os.Stat(distInfo); !os.IsNotExist(err) {
-		t.Error("dist-info dir should be removed")
-	}
-}
-
-func TestDepsCacheClear(t *testing.T) {
-	// Create temp .goru/cache
-	origDir, _ := os.Getwd()
-	tmpDir := t.TempDir()
-	os.Chdir(tmpDir)
-	defer os.Chdir(origDir)
-
-	cacheDir := filepath.Join(".goru", "cache")
-	os.MkdirAll(cacheDir, 0755)
-	os.WriteFile(filepath.Join(cacheDir, "test.whl"), []byte("test"), 0644)
-
-	// Clear cache
-	depsCacheClear()
-
-	// Verify cache is gone
-	if _, err := os.Stat(cacheDir); !os.IsNotExist(err) {
-		t.Error("cache dir should be removed")
 	}
 }
