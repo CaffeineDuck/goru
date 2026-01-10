@@ -77,17 +77,23 @@ func runRun(cmd *cobra.Command, args []string) {
 		}
 		source = string(data)
 	default:
+		// Check if stdin has data (not a terminal)
+		stat, _ := os.Stdin.Stat()
+		if (stat.Mode() & os.ModeCharDevice) != 0 {
+			// No piped input, show help
+			cmd.Help()
+			return
+		}
 		data, err := io.ReadAll(os.Stdin)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
 			os.Exit(1)
 		}
 		source = string(data)
-	}
-
-	if source == "" {
-		cmd.Help()
-		os.Exit(1)
+		if source == "" {
+			cmd.Help()
+			return
+		}
 	}
 
 	language, langErr := getLanguage(lang, filename)

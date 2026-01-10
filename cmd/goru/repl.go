@@ -102,16 +102,14 @@ func runRepl(cmd *cobra.Command, args []string) {
 
 	fmt.Fprintf(os.Stderr, "goru %s REPL (type 'exit' to quit, Ctrl+D to exit)\n", langName)
 
-	var multiLine strings.Builder
-	inMultiLine := false
+	var codeBuffer strings.Builder
 
 	for {
 		line, err := rl.Readline()
 		if err != nil {
 			if err == readline.ErrInterrupt {
-				if inMultiLine {
-					multiLine.Reset()
-					inMultiLine = false
+				if codeBuffer.Len() > 0 {
+					codeBuffer.Reset()
 					rl.SetPrompt(">>> ")
 					continue
 				}
@@ -125,32 +123,51 @@ func runRepl(cmd *cobra.Command, args []string) {
 			break
 		}
 
-		// Handle multi-line input
+		// Handle explicit line continuation
 		if strings.HasSuffix(line, "\\") {
-			multiLine.WriteString(strings.TrimSuffix(line, "\\"))
-			multiLine.WriteString("\n")
-			inMultiLine = true
+			codeBuffer.WriteString(strings.TrimSuffix(line, "\\"))
+			codeBuffer.WriteString("\n")
 			rl.SetPrompt("... ")
 			continue
 		}
 
-		if inMultiLine {
-			multiLine.WriteString(line)
-			line = multiLine.String()
-			multiLine.Reset()
-			inMultiLine = false
-			rl.SetPrompt(">>> ")
+		// Build up the code
+		if codeBuffer.Len() > 0 {
+			codeBuffer.WriteString(line)
+			codeBuffer.WriteString("\n")
+		} else {
+			trimmed := strings.TrimSpace(line)
+			if trimmed == "" {
+				continue
+			}
+			if trimmed == "exit" || trimmed == "quit" {
+				break
+			}
+			codeBuffer.WriteString(line)
+			codeBuffer.WriteString("\n")
 		}
 
-		line = strings.TrimSpace(line)
-		if line == "" {
+		code := codeBuffer.String()
+
+		// Check if code is complete (handles def, for, if blocks)
+		complete, err := session.CheckComplete(context.Background(), code)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			codeBuffer.Reset()
+			rl.SetPrompt(">>> ")
 			continue
 		}
-		if line == "exit" || line == "quit" {
-			break
+
+		if !complete {
+			rl.SetPrompt("... ")
+			continue
 		}
 
-		result := session.Run(context.Background(), line)
+		// Code is complete, execute it
+		codeBuffer.Reset()
+		rl.SetPrompt(">>> ")
+
+		result := session.RunRepl(context.Background(), strings.TrimRight(code, "\n"))
 		if result.Output != "" {
 			fmt.Print(result.Output)
 			if !strings.HasSuffix(result.Output, "\n") {

@@ -363,3 +363,111 @@ print(result)
 		t.Errorf("expected 'async works', got: %q", result.Output)
 	}
 }
+
+func TestSessionReplModeExpression(t *testing.T) {
+	exec, err := New(hostfunc.NewRegistry())
+	if err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+	defer exec.Close()
+
+	session, err := exec.NewSession(python.New())
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer session.Close()
+
+	// Test that expressions are auto-printed in REPL mode
+	result := session.RunRepl(context.Background(), `1 + 1`)
+	if result.Error != nil {
+		t.Fatalf("run failed: %v", result.Error)
+	}
+
+	if !strings.Contains(result.Output, "2") {
+		t.Errorf("expected REPL to output '2', got: %q", result.Output)
+	}
+
+	// Test that _ contains the last expression result
+	result = session.RunRepl(context.Background(), `_`)
+	if result.Error != nil {
+		t.Fatalf("run failed: %v", result.Error)
+	}
+
+	if !strings.Contains(result.Output, "2") {
+		t.Errorf("expected _ to be 2, got: %q", result.Output)
+	}
+}
+
+func TestSessionReplModeStatement(t *testing.T) {
+	exec, err := New(hostfunc.NewRegistry())
+	if err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+	defer exec.Close()
+
+	session, err := exec.NewSession(python.New())
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer session.Close()
+
+	// Statements should not auto-print
+	result := session.RunRepl(context.Background(), `x = 42`)
+	if result.Error != nil {
+		t.Fatalf("run failed: %v", result.Error)
+	}
+
+	// Empty output for assignment
+	if strings.TrimSpace(result.Output) != "" {
+		t.Errorf("expected no output for assignment, got: %q", result.Output)
+	}
+
+	// But the variable should be set
+	result = session.RunRepl(context.Background(), `x`)
+	if result.Error != nil {
+		t.Fatalf("run failed: %v", result.Error)
+	}
+
+	if !strings.Contains(result.Output, "42") {
+		t.Errorf("expected x to be 42, got: %q", result.Output)
+	}
+}
+
+func TestSessionCheckComplete(t *testing.T) {
+	exec, err := New(hostfunc.NewRegistry())
+	if err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+	defer exec.Close()
+
+	session, err := exec.NewSession(python.New())
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer session.Close()
+
+	tests := []struct {
+		code     string
+		complete bool
+	}{
+		{"1 + 1", true},
+		{"x = 42", true},
+		{"def foo():", false},
+		{"def foo():\n    pass\n", true}, // trailing newline marks block complete
+		{"if True:", false},
+		{"if True:\n    pass\n", true},
+		{"for i in range(10):", false},
+		{"for i in range(10):\n    pass\n", true},
+	}
+
+	for _, tc := range tests {
+		complete, err := session.CheckComplete(context.Background(), tc.code)
+		if err != nil {
+			t.Errorf("CheckComplete(%q) error: %v", tc.code, err)
+			continue
+		}
+		if complete != tc.complete {
+			t.Errorf("CheckComplete(%q) = %v, want %v", tc.code, complete, tc.complete)
+		}
+	}
+}

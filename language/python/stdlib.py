@@ -283,7 +283,8 @@ def _apply_runtime_patches():
     _asyncio_module.run = run_async
 
 def _session_loop():
-    _globals = {"__builtins__": __builtins__, "__name__": "__main__"}
+    import codeop
+    _globals = {"__builtins__": __builtins__, "__name__": "__main__", "_": None}
     _globals.update({
         "call": call,
         "async_call": async_call,
@@ -294,6 +295,7 @@ def _session_loop():
         "kv": kv,
         "HTTPResponse": HTTPResponse,
     })
+    _compiler = codeop.CommandCompiler()
 
     while True:
         try:
@@ -307,11 +309,39 @@ def _session_loop():
             if cmd_type == "exit":
                 break
 
-            if cmd_type == "exec":
+            if cmd_type == "check":
+                # Check if code is complete (for multi-line REPL)
                 code = cmd.get("code", "")
                 try:
-                    compiled = compile(code, "<session>", "exec")
-                    exec(compiled, _globals)
+                    result = _compiler(code, "<session>", "single")
+                    if result is None:
+                        _sys.stderr.write("\x00GORU_INCOMPLETE\x00")
+                    else:
+                        _sys.stderr.write("\x00GORU_COMPLETE\x00")
+                except (SyntaxError, OverflowError, ValueError):
+                    _sys.stderr.write("\x00GORU_COMPLETE\x00")  # Let exec handle the error
+                _sys.stderr.flush()
+                continue
+
+            if cmd_type == "exec":
+                code = cmd.get("code", "")
+                repl_mode = cmd.get("repl", False)
+                try:
+                    if repl_mode:
+                        # REPL mode: try eval first for expressions
+                        try:
+                            compiled = compile(code, "<session>", "eval")
+                            result = eval(compiled, _globals)
+                            if result is not None:
+                                _globals["_"] = result
+                                print(repr(result))
+                        except SyntaxError:
+                            # Not an expression, execute as statement
+                            compiled = compile(code, "<session>", "exec")
+                            exec(compiled, _globals)
+                    else:
+                        compiled = compile(code, "<session>", "exec")
+                        exec(compiled, _globals)
                     _sys.stdout.flush()
                     _sys.stderr.write("\x00GORU_DONE\x00")
                     _sys.stderr.flush()

@@ -282,9 +282,19 @@ func (s *Session) registerHostFunctions() {
 type execCommand struct {
 	Type string `json:"type"`
 	Code string `json:"code,omitempty"`
+	Repl bool   `json:"repl,omitempty"`
 }
 
 func (s *Session) Run(ctx context.Context, code string) Result {
+	return s.runInternal(ctx, code, false)
+}
+
+// RunRepl executes code in REPL mode - expressions are auto-printed and result stored in _
+func (s *Session) RunRepl(ctx context.Context, code string) Result {
+	return s.runInternal(ctx, code, true)
+}
+
+func (s *Session) runInternal(ctx context.Context, code string, replMode bool) Result {
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 
@@ -307,7 +317,7 @@ func (s *Session) Run(ctx context.Context, code string) Result {
 	s.stdout.Reset()
 	s.protocol.ResetExec()
 
-	cmd := execCommand{Type: "exec", Code: code}
+	cmd := execCommand{Type: "exec", Code: code, Repl: replMode}
 	cmdBytes, err := json.Marshal(cmd)
 	if err != nil {
 		return Result{Error: fmt.Errorf("marshal command: %w", err), Duration: time.Since(start)}
@@ -331,6 +341,40 @@ func (s *Session) Run(ctx context.Context, code string) Result {
 			Error:    execErr,
 			Duration: time.Since(start),
 		}
+	}
+}
+
+// CheckComplete checks if the code is a complete statement (for multi-line REPL input)
+func (s *Session) CheckComplete(ctx context.Context, code string) (bool, error) {
+	s.execMu.Lock()
+	defer s.execMu.Unlock()
+
+	if s.closed {
+		return false, ErrSessionClosed
+	}
+
+	if !s.started {
+		return false, s.startErr
+	}
+
+	s.protocol.ResetCheck()
+
+	cmd := execCommand{Type: "check", Code: code}
+	cmdBytes, err := json.Marshal(cmd)
+	if err != nil {
+		return false, fmt.Errorf("marshal command: %w", err)
+	}
+	cmdBytes = append(cmdBytes, '\n')
+
+	if _, err := s.stdin.Write(cmdBytes); err != nil {
+		return false, fmt.Errorf("write command: %w", err)
+	}
+
+	select {
+	case <-ctx.Done():
+		return false, ctx.Err()
+	case complete := <-s.protocol.CheckDone():
+		return complete, nil
 	}
 }
 
@@ -388,9 +432,11 @@ func (o *sessionOutput) Reset() {
 }
 
 const (
-	sessionDoneSignal  = "\x00GORU_DONE\x00"
-	sessionErrorPrefix = "\x00GORU_ERROR:"
-	sessionReadySignal = "\x00GORU_READY\x00"
+	sessionDoneSignal       = "\x00GORU_DONE\x00"
+	sessionErrorPrefix      = "\x00GORU_ERROR:"
+	sessionReadySignal      = "\x00GORU_READY\x00"
+	sessionCompleteSignal   = "\x00GORU_COMPLETE\x00"
+	sessionIncompleteSignal = "\x00GORU_INCOMPLETE\x00"
 )
 
 type sessionProtocol struct {
@@ -402,9 +448,10 @@ type sessionProtocol struct {
 	realStderr bytes.Buffer
 	pending    []callRequest
 
-	readyCh chan struct{}
-	doneCh  chan error
-	ready   bool
+	readyCh   chan struct{}
+	doneCh    chan error
+	checkCh   chan bool
+	ready     bool
 
 	mu      sync.Mutex
 	writeMu sync.Mutex
@@ -418,6 +465,7 @@ func newSessionProtocol(ctx context.Context, registry *hostfunc.Registry, stdinW
 		pending:     make([]callRequest, 0),
 		readyCh:     make(chan struct{}),
 		doneCh:      make(chan error, 1),
+		checkCh:     make(chan bool, 1),
 	}
 }
 
@@ -456,6 +504,34 @@ func (p *sessionProtocol) checkSessionSignals(content string) bool {
 		if !p.ready {
 			p.ready = true
 			close(p.readyCh)
+		}
+		return true
+	}
+
+	if idx := strings.Index(content, sessionCompleteSignal); idx != -1 {
+		if idx > 0 {
+			p.realStderr.WriteString(content[:idx])
+		}
+		p.buf.Reset()
+		p.buf.WriteString(content[idx+len(sessionCompleteSignal):])
+
+		select {
+		case p.checkCh <- true:
+		default:
+		}
+		return true
+	}
+
+	if idx := strings.Index(content, sessionIncompleteSignal); idx != -1 {
+		if idx > 0 {
+			p.realStderr.WriteString(content[:idx])
+		}
+		p.buf.Reset()
+		p.buf.WriteString(content[idx+len(sessionIncompleteSignal):])
+
+		select {
+		case p.checkCh <- false:
+		default:
 		}
 		return true
 	}
@@ -621,6 +697,21 @@ func (p *sessionProtocol) ResetExec() {
 	}
 	p.doneCh = make(chan error, 1)
 	p.realStderr.Reset()
+}
+
+func (p *sessionProtocol) ResetCheck() {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
+	select {
+	case <-p.checkCh:
+	default:
+	}
+	p.checkCh = make(chan bool, 1)
+}
+
+func (p *sessionProtocol) CheckDone() <-chan bool {
+	return p.checkCh
 }
 
 func (p *sessionProtocol) Stderr() string {

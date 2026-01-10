@@ -238,6 +238,8 @@ const kv = {
 
 const time_now = () => _goru_call("time_now", {});
 
+let _ = undefined;
+
 const _sessionLoop = () => {
   while (true) {
     const line = std.in.getline();
@@ -250,11 +252,32 @@ const _sessionLoop = () => {
         break;
       }
 
+      if (cmd.type === "check") {
+        // Check if code is complete (simple heuristic for JS)
+        try {
+          new Function(cmd.code);
+          std.err.puts("\x00GORU_COMPLETE\x00");
+        } catch (e) {
+          // Check if it's an "unexpected end of input" type error
+          const msg = e.message.toLowerCase();
+          if (msg.includes("unexpected end") || msg.includes("unterminated")) {
+            std.err.puts("\x00GORU_INCOMPLETE\x00");
+          } else {
+            std.err.puts("\x00GORU_COMPLETE\x00"); // Let exec handle the error
+          }
+        }
+        std.err.flush();
+        continue;
+      }
+
       if (cmd.type === "exec") {
         try {
           const result = std.evalScript(cmd.code);
           if (result !== undefined) {
-            console.log(result);
+            _ = result;
+            if (cmd.repl) {
+              console.log(result);
+            }
           }
           std.err.puts("\x00GORU_DONE\x00");
           std.err.flush();
