@@ -125,8 +125,22 @@ By default, sandboxed code has **zero capabilities**:
 Only **pure Python** packages work (no C extensions, no sockets).
 
 ```bash
+# CLI: pre-install packages
 goru deps install pydantic python-dateutil
 goru repl --lang python --packages .goru/python/packages
+```
+
+```go
+// Go API: use pre-installed packages
+session, _ := exec.NewSession(python.New(),
+    executor.WithPackages(".goru/python/packages"),
+)
+
+// Go API: allow runtime install from sandboxed code
+session, _ := exec.NewSession(python.New(),
+    executor.WithAllowedPackages([]string{"pydantic>=2.0", "python-dateutil"}),
+)
+// Sandboxed code can now call: install_pkg("pydantic")
 ```
 
 Works: `pydantic`, `attrs`, `python-dateutil`, `pyyaml`, `toml`, `jinja2`
