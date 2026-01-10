@@ -247,3 +247,119 @@ func TestMultipleSessions(t *testing.T) {
 		t.Errorf("session2 should have x='session2', got: %q", result2.Output)
 	}
 }
+
+func TestSessionInstallPkgDisabled(t *testing.T) {
+	exec, err := New(hostfunc.NewRegistry())
+	if err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+	defer exec.Close()
+
+	session, err := exec.NewSession(python.New())
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer session.Close()
+
+	result := session.Run(context.Background(), `
+try:
+    install_pkg("requests")
+    print("should not reach here")
+except Exception as e:
+    print(f"error: {e}")
+`)
+	if result.Error != nil {
+		t.Fatalf("run failed: %v", result.Error)
+	}
+
+	if !strings.Contains(result.Output, "error:") {
+		t.Errorf("expected error when install_pkg disabled, got: %q", result.Output)
+	}
+}
+
+func TestSessionInstallPkgNotAllowed(t *testing.T) {
+	exec, err := New(hostfunc.NewRegistry())
+	if err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+	defer exec.Close()
+
+	session, err := exec.NewSession(python.New(), WithAllowedPackages([]string{"requests"}))
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer session.Close()
+
+	result := session.Run(context.Background(), `
+try:
+    install_pkg("dangerous-pkg")
+    print("should not reach here")
+except Exception as e:
+    print(f"error: {e}")
+`)
+	if result.Error != nil {
+		t.Fatalf("run failed: %v", result.Error)
+	}
+
+	if !strings.Contains(result.Output, "not allowed") {
+		t.Errorf("expected 'not allowed' error, got: %q", result.Output)
+	}
+}
+
+func TestSessionTimeNow(t *testing.T) {
+	exec, err := New(hostfunc.NewRegistry())
+	if err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+	defer exec.Close()
+
+	session, err := exec.NewSession(python.New())
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer session.Close()
+
+	result := session.Run(context.Background(), `
+import time
+t = time.time()
+print(f"time: {t}")
+`)
+	if result.Error != nil {
+		t.Fatalf("run failed: %v", result.Error)
+	}
+
+	if !strings.Contains(result.Output, "time:") {
+		t.Errorf("expected time output, got: %q", result.Output)
+	}
+}
+
+func TestSessionAsyncioRun(t *testing.T) {
+	exec, err := New(hostfunc.NewRegistry())
+	if err != nil {
+		t.Fatalf("failed to create executor: %v", err)
+	}
+	defer exec.Close()
+
+	session, err := exec.NewSession(python.New())
+	if err != nil {
+		t.Fatalf("failed to create session: %v", err)
+	}
+	defer session.Close()
+
+	result := session.Run(context.Background(), `
+import asyncio
+
+async def hello():
+    return "async works"
+
+result = asyncio.run(hello())
+print(result)
+`)
+	if result.Error != nil {
+		t.Fatalf("run failed: %v", result.Error)
+	}
+
+	if !strings.Contains(result.Output, "async works") {
+		t.Errorf("expected 'async works', got: %q", result.Output)
+	}
+}

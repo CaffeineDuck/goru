@@ -261,6 +261,7 @@ def _session_loop():
         "call": call,
         "async_call": async_call,
         "run_async": run_async,
+        "install_pkg": install_pkg,
         "http": http,
         "fs": fs,
         "HTTPResponse": HTTPResponse,

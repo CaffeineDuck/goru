@@ -67,7 +67,11 @@ defer session.Close()
 | Option | Description |
 |--------|-------------|
 | `WithSessionTimeout(dur)` | Timeout per execution (default 30s) |
+| `WithSessionAllowedHosts([]string)` | Hosts for HTTP requests |
+| `WithSessionMount(virtual, host, mode)` | Mount filesystem |
 | `WithPackages(path)` | Mount packages directory |
+| `WithPackageInstall(bool)` | Enable runtime package installation |
+| `WithAllowedPackages([]string)` | Restrict installable packages |
 
 ### Running Code in Session
 

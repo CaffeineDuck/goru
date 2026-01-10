@@ -154,6 +154,31 @@ time.time()  # Returns real host time (monkey-patched)
 time_now()  // Returns Unix timestamp
 ```
 
+### install_pkg - Runtime Package Installation
+
+Requires `WithPackageInstall` or `WithAllowedPackages`. Python only.
+
+**Go:**
+```go
+// Allow any package
+session, _ := exec.NewSession(python.New(), executor.WithPackageInstall(true))
+
+// Restrict to specific packages
+session, _ := exec.NewSession(python.New(),
+    executor.WithAllowedPackages([]string{"requests", "pydantic"}))
+```
+
+**Python:**
+```python
+install_pkg("requests")
+install_pkg("pydantic", ">=2.0")
+
+import requests
+resp = requests.get("https://example.com")
+```
+
+Packages are installed to `.goru/python/packages` using pip. Version specifiers (`>=`, `<=`, `==`, `~=`) are supported.
+
 ## Async Support
 
 Both Python and JavaScript support true async/await with concurrent host function execution.
