@@ -1,6 +1,6 @@
 # goru
 
-Run untrusted Python and JavaScript code safely, without Docker or VMs.
+Run untrusted Python and JavaScript safely. No Docker, no VMs, just WebAssembly.
 
 ## The Problem
 
@@ -10,8 +10,6 @@ You need to execute user-submitted or AI-generated code. Your options:
 - **Firecracker/gVisor**: Linux-only, complex setup, operational overhead.
 - **Native execution**: Dangerous. One `os.system('rm -rf /')` and you're done.
 
-goru is a Go library that sandboxes code execution using WebAssembly. No containers, no VMs, no external dependencies.
-
 ## Who It's For
 
 - **Code execution platforms** - LeetCode clones, coding interviews, online judges
@@ -19,70 +17,75 @@ goru is a Go library that sandboxes code execution using WebAssembly. No contain
 - **Plugin systems** - Let users extend your app with custom scripts
 - **Educational platforms** - Safe code playgrounds for students
 
-## Prerequisites
-
-- Go 1.25.5 or higher
-
 ## Install
 
+**CLI** (from [releases](https://github.com/caffeineduck/goru/releases)):
 ```bash
-git clone https://github.com/caffeineduck/goru
-cd goru
+# macOS/Linux
+curl -fsSL https://github.com/caffeineduck/goru/releases/latest/download/goru-$(uname -s)-$(uname -m).tar.gz | tar xz
+sudo mv goru /usr/local/bin/
 
-# Download WASM runtimes (~28MB total)
-go generate ./...
-
-# Build
-go build -o goru ./cmd/goru
+# Or build from source
+git clone https://github.com/caffeineduck/goru && cd goru
+go generate ./... && go build -o goru ./cmd/goru
 ```
 
-## Usage
-
-### Stateless Execution
-
-```go
-package main
-
-import (
-    "context"
-    "fmt"
-
-    "github.com/caffeineduck/goru/executor"
-    "github.com/caffeineduck/goru/hostfunc"
-    "github.com/caffeineduck/goru/language/python"
-    "github.com/caffeineduck/goru/language/javascript"
-)
-
-func main() {
-    exec, _ := executor.New(hostfunc.NewRegistry())
-    defer exec.Close()
-
-    // Python
-    result := exec.Run(context.Background(), python.New(), `print("Hello from Python")`)
-    fmt.Println(result.Output)
-
-    // JavaScript
-    result = exec.Run(context.Background(), javascript.New(), `console.log("Hello from JS")`)
-    fmt.Println(result.Output)
-}
+**Go Library**:
+```bash
+go get github.com/caffeineduck/goru
 ```
 
-### Sessions (Persistent State)
+## CLI Usage
 
-Sessions keep the interpreter alive between executions, allowing variables and functions to persist:
+```bash
+goru -c 'print(1+1)'                     # Run Python
+goru -lang js -c 'console.log(1+1)'      # Run JavaScript
+goru script.py                           # Run file
+goru repl                                # Interactive REPL
+goru repl -kv                            # REPL with KV store
+```
+
+**Python Packages** - Install PyPI packages for sandboxed use:
+```bash
+goru deps install requests pydantic      # Install to .goru/python/packages
+goru repl -packages .goru/python/packages
+```
+
+**Capabilities** - Enable features explicitly:
+```bash
+goru -c 'print(http.get("https://api.example.com").text)' \
+    -allow-host api.example.com          # Allow HTTP
+
+goru -c 'print(fs.read_text("/data/in.txt"))' \
+    -mount /data:./mydata:ro             # Mount filesystem (ro/rw/rwc)
+
+goru -c 'kv.set("x", 42); print(kv.get("x"))' \
+    -kv                                  # Enable KV store
+```
+
+## Go API
 
 ```go
 exec, _ := executor.New(hostfunc.NewRegistry())
 defer exec.Close()
 
-session, _ := exec.NewSession(python.New())
-defer session.Close()
+// Stateless execution
+result := exec.Run(ctx, python.New(), `print("hello")`)
 
-// State persists between runs
+// Session with persistent state
+session, _ := exec.NewSession(python.New())
 session.Run(ctx, `x = 42`)
-session.Run(ctx, `def greet(name): return f"Hello, {name}!"`)
-result := session.Run(ctx, `print(greet("World"), x)`)
-// Output: Hello, World! 42
+session.Run(ctx, `print(x)`)  // 42
+```
+
+**Enable capabilities**:
+```go
+result := exec.Run(ctx, python.New(), code,
+    executor.WithAllowedHosts([]string{"api.example.com"}),
+    executor.WithMount("/data", "./input", executor.MountReadOnly),
+    executor.WithKV(),
+    executor.WithTimeout(10*time.Second),
+)
 ```
 
 ## Security Model
@@ -93,139 +96,52 @@ By default, sandboxed code can do nothing dangerous:
 |------------|---------|---------------|
 | Filesystem | Blocked | `WithMount("/data", "./input", MountReadOnly)` |
 | Network | Blocked | `WithAllowedHosts([]string{"api.example.com"})` |
+| KV Store | Blocked | `WithKV()` |
+| Memory | 256MB | `WithMemoryLimit(executor.MemoryLimit64MB)` |
 | System calls | Blocked | N/A (WASM has no syscalls) |
 
-Capabilities are explicitly granted, not revoked:
+## Sandboxed APIs
 
-```go
-// Allow reading from ./input, writing to ./output
-// Allow HTTP only to api.openai.com
-result := exec.Run(ctx, python.New(), code,
-    executor.WithMount("/input", "./input", executor.MountReadOnly),
-    executor.WithMount("/output", "./output", executor.MountReadWrite),
-    executor.WithAllowedHosts([]string{"api.openai.com"}),
-    executor.WithTimeout(10*time.Second),
-)
-```
-
-## Features
-
-**Languages**: Python 3.12, JavaScript ES2023
-
-**Host Functions**: Sandboxed code can call back into Go through controlled interfaces:
+Available to sandboxed code when enabled:
 
 ```python
-# HTTP (requires WithAllowedHosts)
+# HTTP (requires -allow-host or WithAllowedHosts)
 resp = http.get("https://api.example.com/data")
 print(resp.json())
 
-# Filesystem (requires WithMount)
-data = fs.read_text("/input/config.json")
+# Filesystem (requires -mount or WithMount)
+data = fs.read_text("/data/config.json")
 fs.write_text("/output/result.txt", "done")
 
-# KV store (cross-run and cross-language data sharing)
-kv.set("result", {"score": 42})
-data = kv.get("result")
-print(data["score"])  # 42
+# KV Store (requires -kv or WithKV)
+kv.set("key", {"nested": "value"})
+print(kv.get("key"))
+
+# Custom host functions
+user = call("get_user", id="123")  # Calls Go function
 ```
 
-**Async Support**: True async/await with concurrent host function execution:
-
-```python
-# HTTP (requires WithAllowedHosts)
-resp = http.get("https://api.example.com/data")
-print(resp.json())
-
-# Filesystem (requires WithMount)
-data = fs.read_text("/input/config.json")
-fs.write_text("/output/result.txt", "done")
-```
-
-**Async Support**: True async/await with concurrent host function execution:
-
+**Async support** for concurrent operations:
 ```python
 import asyncio
-
-async def main():
-    # These run concurrently
-    results = await asyncio.gather(
-        http.async_get("https://api1.example.com"),
-        http.async_get("https://api2.example.com"),
-        http.async_get("https://api3.example.com"),
-    )
-    return results
-
-asyncio.run(main())
-```
-
-**Custom Host Functions**: Expose your own Go functions to sandboxed code:
-
-```go
-registry := hostfunc.NewRegistry()
-registry.Register("get_user", func(ctx context.Context, args map[string]any) (any, error) {
-    userID := args["id"].(string)
-    return map[string]any{"id": userID, "name": "Alice"}, nil
-})
-
-exec, _ := executor.New(registry)
-```
-
-```python
-user = call("get_user", id="123")
-print(user["name"])  # Alice
-```
-
-**CLI**: Run code from command line, REPL, or HTTP server:
-
-```bash
-goru -c 'print(1+1)'                    # Python (default)
-goru -lang js -c 'console.log(1+1)'     # JavaScript
-goru script.py                          # From file
-goru repl                               # Interactive REPL with persistent state
-goru serve -port 8080                   # HTTP API server
-
-# Package management (Python only)
-
-Install packages from PyPI for use in sandboxed code:
-
-```bash
-# Install packages to .goru/python/packages
-goru deps install pydantic requests
-
-# List installed packages
-goru deps list
-
-# Remove a package
-goru deps remove pydantic
-
-# Use in REPL
-goru repl -packages .goru/python/packages
-
-# Use in code
-session, _ := exec.NewSession(python.New(), executor.WithPackages(".goru/python/packages"))
-```
-
-Note: JavaScript packages not supported. Use bundling for JS.
+results = await asyncio.gather(
+    http.async_get("https://api1.example.com"),
+    http.async_get("https://api2.example.com"),
+)
 ```
 
 ## Trade-offs
 
-**Cold start is slow.** First execution compiles WASM, which takes time (especially Python). Use `WithDiskCache()` to cache compilation:
-
-```go
-exec, _ := executor.New(registry, executor.WithDiskCache())
-```
-
-**Not native performance.** Code runs in a WASM interpreter. Fine for scripts, not for compute-heavy workloads.
-
-**Limited language support.** Only Python and JavaScript. Adding languages requires WASM-compiled runtimes.
+- **Cold start is slow** - WASM compilation takes time. Use `WithDiskCache()` or `-no-cache=false` (default).
+- **Not native performance** - Fine for scripts, not for compute-heavy workloads.
+- **Python and JavaScript only** - Adding languages requires WASM-compiled runtimes.
 
 ## Documentation
 
-- [API Reference](docs/api.md) - Go library usage
-- [Host Functions](docs/host-functions.md) - HTTP, filesystem, custom functions
-- [CLI Reference](docs/cli.md) - Command-line, REPL, and server mode
-- [Languages](docs/languages.md) - Python/JS specifics and limitations
+- [CLI Reference](docs/cli.md)
+- [Go API](docs/api.md)
+- [Host Functions](docs/host-functions.md)
+- [Language Details](docs/languages.md)
 
 ## License
 

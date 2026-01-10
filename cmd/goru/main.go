@@ -171,14 +171,15 @@ func runCmd(args []string) {
 		lang         = fs.String("lang", "", "Language: python, js (default: auto-detect)")
 		timeout      = fs.Duration("timeout", 30*time.Second, "Execution timeout")
 		noCache      = fs.Bool("no-cache", false, "Disable compilation cache")
+		enableKV     = fs.Bool("kv", false, "Enable key-value store")
 		allowedHosts stringSlice
 		mounts       stringSlice
 		// Security limits
-		httpMaxURL = fs.Int("http-max-url", 8192, "Max HTTP URL length")
+		httpMaxURL  = fs.Int("http-max-url", 8192, "Max HTTP URL length")
 		httpMaxBody = fs.Int64("http-max-body", 1024*1024, "Max HTTP response body")
-		fsMaxFile  = fs.Int64("fs-max-file", 10*1024*1024, "Max file read size")
-		fsMaxWrite = fs.Int64("fs-max-write", 10*1024*1024, "Max file write size")
-		fsMaxPath  = fs.Int("fs-max-path", 4096, "Max path length")
+		fsMaxFile   = fs.Int64("fs-max-file", 10*1024*1024, "Max file read size")
+		fsMaxWrite  = fs.Int64("fs-max-write", 10*1024*1024, "Max file write size")
+		fsMaxPath   = fs.Int("fs-max-path", 4096, "Max path length")
 	)
 	fs.Var(&allowedHosts, "allow-host", "Allowed HTTP host (repeatable)")
 	fs.Var(&mounts, "mount", "Mount spec virtual:host:mode (repeatable)")
@@ -242,6 +243,10 @@ func runCmd(args []string) {
 		runOpts = append(runOpts, executor.WithAllowedHosts(allowedHosts))
 	}
 
+	if *enableKV {
+		runOpts = append(runOpts, executor.WithKV())
+	}
+
 	for _, spec := range mounts {
 		m, err := parseMount(spec)
 		if err != nil {
@@ -270,6 +275,7 @@ func replCmd(args []string) {
 		lang     = fs.String("lang", "python", "Language: python, js")
 		packages = fs.String("packages", "", "Path to packages directory (Python only)")
 		noCache  = fs.Bool("no-cache", false, "Disable compilation cache")
+		enableKV = fs.Bool("kv", false, "Enable key-value store")
 	)
 	fs.Parse(args)
 
@@ -292,6 +298,9 @@ func replCmd(args []string) {
 	var sessionOpts []executor.SessionOption
 	if *packages != "" {
 		sessionOpts = append(sessionOpts, executor.WithPackages(*packages))
+	}
+	if *enableKV {
+		sessionOpts = append(sessionOpts, executor.WithSessionKV())
 	}
 
 	session, err := exec.NewSession(language, sessionOpts...)

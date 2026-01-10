@@ -25,12 +25,14 @@ declare function runAsync<T>(...promises: Promise<T>[]): Promise<T[]>;
 // =============================================================================
 
 interface KVModule {
-  get(key: string, defaultValue?: string | null): string | null;
-  set(key: string, value: string): string;
+  get(key: string, defaultValue?: unknown): unknown;
+  set(key: string, value: unknown): string;
   delete(key: string): string;
-  asyncGet(key: string, defaultValue?: string | null): Promise<string | null>;
-  asyncSet(key: string, value: string): Promise<string>;
+  keys(): string[];
+  asyncGet(key: string, defaultValue?: unknown): Promise<unknown>;
+  asyncSet(key: string, value: unknown): Promise<string>;
   asyncDelete(key: string): Promise<string>;
+  asyncKeys(): Promise<string[]>;
 }
 
 declare const kv: KVModule;

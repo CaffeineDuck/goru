@@ -141,6 +141,47 @@ await fs.asyncWriteText("/out/result.txt", "content");
 
 Path traversal attacks (`../`) are blocked.
 
+### kv - Key-Value Store
+
+Share data across runs and languages. Requires `WithKV()` or `-kv` flag.
+
+**Go:**
+```go
+exec.Run(ctx, lang, code, executor.WithKV())
+```
+
+**Python:**
+```python
+kv.set("key", "value")
+kv.set("user", {"name": "Alice", "score": 42})
+kv.get("key")                    # "value"
+kv.get("missing")                # None
+kv.get("missing", "default")     # "default"
+kv.delete("key")
+kv.keys()                        # ["user"]
+
+# Async
+await kv.async_set("key", "value")
+await kv.async_get("key")
+```
+
+**JavaScript:**
+```javascript
+kv.set("key", "value");
+kv.set("user", {name: "Alice", score: 42});
+kv.get("key");                   // "value"
+kv.get("missing");               // null
+kv.get("missing", "default");    // "default"
+kv.delete("key");
+kv.keys();                       // ["user"]
+
+// Async
+await kv.asyncSet("key", "value");
+await kv.asyncGet("key");
+```
+
+Values can be any JSON-serializable type. Each executor instance has isolated storage.
+
 ### time
 
 **Python:**
