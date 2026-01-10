@@ -22,7 +22,7 @@ You need to execute user-submitted or AI-generated code. Your options:
 - **Bidirectional host-guest protocol** - Sandboxed code calls Go functions via `call()`, Go receives structured responses ([docs](docs/sandbox-api.md#call))
 - **Extensible** - Register custom Go functions callable from sandbox via `Registry.Register()` ([docs](https://pkg.go.dev/github.com/caffeineduck/goru/hostfunc#Registry))
 - **Async batching** - Concurrent host calls with `asyncio.gather()` / `Promise.all()` batched into single round-trip ([docs](docs/sandbox-api.md#async-batching))
-- **Capability-based security** - Zero permissions by default, opt-in HTTP/filesystem/KV per-session
+- **Capability-based security** - Zero permissions by default, opt-in HTTP/filesystem/KV per-session ([docs](https://pkg.go.dev/github.com/caffeineduck/goru/executor#SessionOption))
 - **Session state** - Variables persist across executions, define functions once and reuse ([docs](https://pkg.go.dev/github.com/caffeineduck/goru/executor#Session))
 - **Built-in modules** - `http`, `fs`, `kv` available in sandbox without imports when enabled ([docs](docs/sandbox-api.md#modules))
 - **Python packages** - Pre-install via CLI or allow runtime `install_pkg()` from sandboxed code ([docs](docs/sandbox-api.md#install_pkg-python-only))
