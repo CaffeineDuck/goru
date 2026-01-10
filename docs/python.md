@@ -61,9 +61,9 @@ fs.mkdir("/out/subdir")
 fs.remove("/out/temp.txt")
 
 # Runtime Package Install (requires WithAllowedPackages)
-install_pkg("requests")
-install_pkg("pydantic", ">=2.0")
-import requests  # now available
+install_pkg("pydantic")
+install_pkg("python-dateutil", ">=2.8")
+from pydantic import BaseModel  # now available
 
 # Time (monkey-patched stdlib)
 import time
@@ -96,19 +96,19 @@ All sync methods have async variants: `async_get`, `async_set`, `async_read_text
 
 **Pre-install (recommended):**
 ```bash
-goru deps install requests pydantic
-goru repl -packages .goru/python/packages
+goru deps install pydantic python-dateutil
+goru repl --lang python --packages .goru/python/packages
 ```
 
 **Runtime install:**
 ```go
 session, _ := exec.NewSession(python.New(),
-    executor.WithAllowedPackages([]string{"requests>=2.32", "pydantic>=2.0"}))
+    executor.WithAllowedPackages([]string{"pydantic>=2.0", "python-dateutil>=2.8"}))
 ```
 
 ```python
-install_pkg("requests")  # Downloads from PyPI at runtime
-import requests
+install_pkg("pydantic")  # Downloads from PyPI at runtime
+from pydantic import BaseModel
 ```
 
 ### Package Limitations
@@ -118,11 +118,11 @@ Not all packages work in WASI:
 | Works | Doesn't Work |
 |-------|--------------|
 | Pure Python packages | C extensions (numpy, pandas) |
-| pydantic, requests | aiohttp (needs async sockets) |
-| dataclasses, attrs | Django, Flask (need sockets) |
-| json, yaml parsers | ML libraries (tensorflow, torch) |
+| pydantic, attrs | requests, httpx (use goru's `http` module) |
+| python-dateutil | aiohttp (needs async sockets) |
+| pyyaml, toml, jinja2 | Django, Flask (need sockets) |
 
-Use `pip install --target` to pre-install, or `install_pkg()` for runtime install of allowlisted packages.
+Use `goru deps install` to pre-install, or `install_pkg()` for runtime install of allowlisted packages.
 
 ## Type Stubs
 

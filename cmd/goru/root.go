@@ -99,3 +99,20 @@ func getLanguage(langFlag string, filename string) (executor.Language, error) {
 		return nil, fmt.Errorf("unknown language %q: use python or js", lang)
 	}
 }
+
+func parseMemoryLimit(s string) uint32 {
+	switch strings.ToLower(s) {
+	case "1mb":
+		return executor.MemoryLimit1MB
+	case "16mb":
+		return executor.MemoryLimit16MB
+	case "64mb":
+		return executor.MemoryLimit64MB
+	case "256mb":
+		return executor.MemoryLimit256MB
+	case "1gb":
+		return executor.MemoryLimit1GB
+	default:
+		return 0 // use default
+	}
+}

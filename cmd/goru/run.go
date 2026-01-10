@@ -36,6 +36,7 @@ func addRunFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("kv", false, "Enable key-value store")
 	cmd.Flags().StringSlice("allow-host", nil, "Allow HTTP to host (repeatable)")
 	cmd.Flags().StringSlice("mount", nil, "Mount filesystem virtual:host:mode (repeatable)")
+	cmd.Flags().String("memory", "256mb", "Memory limit: 1mb, 16mb, 64mb, 256mb, 1gb")
 
 	// Security limits
 	cmd.Flags().Int("http-max-url", 8192, "Max HTTP URL length")
@@ -59,6 +60,7 @@ func runRun(cmd *cobra.Command, args []string) {
 	fsMaxFile, _ := cmd.Flags().GetInt64("fs-max-file")
 	fsMaxWrite, _ := cmd.Flags().GetInt64("fs-max-write")
 	fsMaxPath, _ := cmd.Flags().GetInt("fs-max-path")
+	memoryLimit, _ := cmd.Flags().GetString("memory")
 
 	var source string
 	var filename string
@@ -98,6 +100,9 @@ func runRun(cmd *cobra.Command, args []string) {
 	var execOpts []executor.ExecutorOption
 	if !noCache {
 		execOpts = append(execOpts, executor.WithDiskCache())
+	}
+	if pages := parseMemoryLimit(memoryLimit); pages > 0 {
+		execOpts = append(execOpts, executor.WithMemoryLimit(pages))
 	}
 
 	exec, err := executor.New(registry, execOpts...)
