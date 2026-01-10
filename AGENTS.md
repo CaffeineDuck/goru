@@ -11,7 +11,6 @@ goru/
   hostfunc/         Host function implementations (HTTP, filesystem, KV)
   language/         Language runtimes (python/, javascript/)
   internal/tools/   Build tools (WASM downloader)
-  bench/            Benchmarks
   docs/             Documentation
 ```
 
@@ -48,9 +47,6 @@ go test ./hostfunc -run TestHTTPRequest
 
 # Run tests with verbose output
 go test -v ./executor -run TestPythonCustomHostFunction
-
-# Run benchmarks
-go test -bench=. ./bench
 ```
 
 ## Lint/Format Commands
