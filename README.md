@@ -17,6 +17,27 @@ You need to execute user-submitted or AI-generated code. Your options:
 - **Plugin systems** - Let users extend your app with custom scripts
 - **Educational platforms** - Safe code playgrounds for students
 
+## Features
+
+- **Zero-capability default** - Sandboxed code can't access filesystem, network, or system
+- **Granular permissions** - Enable HTTP, filesystem, KV store per-session
+- **Custom host functions** - Expose Go functions to sandboxed code
+- **Sessions** - Persistent state across multiple executions
+- **Python packages** - Pure Python packages from PyPI (no pip required)
+- **Fast cold start** - ~1.5s Python, ~200ms JavaScript (with disk caching)
+- **Cross-platform** - Works on Linux, macOS, Windows (no Docker needed)
+
+## Security Model
+
+By default, sandboxed code has **zero capabilities**:
+
+| Capability | Default | Enable With |
+|------------|---------|-------------|
+| Filesystem | Blocked | `WithMount()` |
+| HTTP | Blocked | `WithAllowedHosts()` |
+| KV Store | Blocked | `WithKV()` |
+| Host Functions | Blocked | `Registry.Register()` |
+
 ## Install
 
 ```bash
@@ -108,17 +129,6 @@ exec, _ := executor.New(registry,
     executor.WithMemoryLimit(executor.MemoryLimit64MB),
 )
 ```
-
-## Security Model
-
-By default, sandboxed code has **zero capabilities**:
-
-| Capability | Default | Enable With |
-|------------|---------|-------------|
-| Filesystem | Blocked | `WithMount()` |
-| HTTP | Blocked | `WithAllowedHosts()` |
-| KV Store | Blocked | `WithKV()` |
-| Host Functions | Blocked | `Registry.Register()` |
 
 ## Python Packages
 
