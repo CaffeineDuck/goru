@@ -19,12 +19,12 @@ You need to execute user-submitted or AI-generated code. Your options:
 
 ## Features
 
-- **Bidirectional host-guest protocol** - Sandboxed code calls Go functions via `call()`, Go receives structured responses
-- **Async batching** - Concurrent host calls with `asyncio.gather()` / `Promise.all()` batched into single round-trip
+- **Bidirectional host-guest protocol** - Sandboxed code calls Go functions via `call()`, Go receives structured responses ([docs](docs/host-functions.md#custom-functions))
+- **Async batching** - Concurrent host calls with `asyncio.gather()` / `Promise.all()` batched into single round-trip ([docs](docs/host-functions.md#async-support))
 - **Capability-based security** - Zero permissions by default, opt-in HTTP/filesystem/KV per-session
-- **Session state** - Variables persist across executions, define functions once and reuse
-- **Built-in modules** - `http`, `fs`, `kv` available in sandbox without imports (when enabled)
-- **Self-contained package install** - Downloads wheels from PyPI, extracts directly, no pip/venv needed
+- **Session state** - Variables persist across executions, define functions once and reuse ([docs](docs/api.md#sessions))
+- **Built-in modules** - `http`, `fs`, `kv` available in sandbox without imports when enabled ([docs](docs/host-functions.md#built-in-modules))
+- **Python packages** - Pre-install via CLI or allow runtime `install_pkg()` from sandboxed code ([docs](docs/python.md#package-installation))
 
 ## Security Model
 
@@ -128,27 +128,6 @@ exec, _ := executor.New(registry,
     executor.WithMemoryLimit(executor.MemoryLimit64MB),
 )
 ```
-
-## Python Packages
-
-Only **pure Python** packages work (no C extensions, no sockets).
-
-```bash
-# CLI: pre-install packages
-goru deps install pydantic python-dateutil
-goru repl --lang python --packages .goru/python/packages
-```
-
-```go
-// Go API: allow runtime install from sandboxed code
-session, _ := exec.NewSession(python.New(),
-    executor.WithAllowedPackages([]string{"pydantic>=2.0", "python-dateutil"}),
-)
-// Sandboxed code can now call: install_pkg("pydantic")
-```
-
-Works: `pydantic`, `attrs`, `python-dateutil`, `pyyaml`, `toml`, `jinja2`
-Blocked: `numpy`, `pandas`, `requests`, `flask` (C extensions or sockets)
 
 ## Documentation
 
