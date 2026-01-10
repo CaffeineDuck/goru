@@ -19,12 +19,12 @@ You need to execute user-submitted or AI-generated code. Your options:
 
 ## Features
 
-- **Zero-capability default** - Sandboxed code can't access filesystem, network, or system
-- **Granular permissions** - Enable HTTP, filesystem, KV store per-session
-- **Custom host functions** - Expose Go functions to sandboxed code
-- **Sessions** - Persistent state across multiple executions
-- **Python packages** - Pure Python packages from PyPI (no pip required)
-- **Cross-platform** - Works on Linux, macOS, Windows (no Docker needed)
+- **Bidirectional host-guest protocol** - Sandboxed code calls Go functions via `call()`, Go receives structured responses
+- **Async batching** - Concurrent host calls with `asyncio.gather()` / `Promise.all()` batched into single round-trip
+- **Capability-based security** - Zero permissions by default, opt-in HTTP/filesystem/KV per-session
+- **Session state** - Variables persist across executions, define functions once and reuse
+- **Built-in modules** - `http`, `fs`, `kv` available in sandbox without imports (when enabled)
+- **Self-contained package install** - Downloads wheels from PyPI, extracts directly, no pip/venv needed
 
 ## Security Model
 
