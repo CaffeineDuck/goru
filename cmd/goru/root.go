@@ -13,9 +13,23 @@ import (
 	"github.com/spf13/cobra"
 )
 
+// Set via ldflags: -ldflags "-X main.version=v1.0.0 -X main.commit=abc123"
+var (
+	version = "dev"
+	commit  = "unknown"
+)
+
+func versionString() string {
+	if version == "dev" {
+		return fmt.Sprintf("dev (%s)", commit)
+	}
+	return version
+}
+
 var rootCmd = &cobra.Command{
-	Use:   "goru [file]",
-	Short: "WASM code sandbox for Python and JavaScript",
+	Use:     "goru [file]",
+	Short:   "WASM code sandbox for Python and JavaScript",
+	Version: versionString(),
 	Long: `goru - Run untrusted Python and JavaScript safely using WebAssembly.
 
 Run code from files, inline strings, or stdin. By default, sandboxed code

@@ -41,7 +41,10 @@ jobs:
         run: |
           ext=""
           if [ "$GOOS" = "windows" ]; then ext=".exe"; fi
-          go build -o goru-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/goru
+          VERSION=${GITHUB_REF#refs/tags/}
+          COMMIT=${GITHUB_SHA::8}
+          go build -ldflags "-X main.version=${VERSION} -X main.commit=${COMMIT}" \
+            -o goru-${{ matrix.goos }}-${{ matrix.goarch }}${ext} ./cmd/goru
 
       - uses: actions/upload-artifact@v4
         with:
