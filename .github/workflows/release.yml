@@ -9,7 +9,23 @@ permissions:
   contents: write
 
 jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.5'
+
+      - name: Download WASM runtimes
+        run: go generate ./...
+
+      - name: Test
+        run: go test ./... -timeout 120s
+
   build:
+    needs: test
     runs-on: ubuntu-latest
     strategy:
       matrix:

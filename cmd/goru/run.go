@@ -32,11 +32,18 @@ func init() {
 
 func addRunFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("code", "c", "", "Code to execute")
+	addSessionFlags(cmd)
+}
+
+func addSessionFlags(cmd *cobra.Command) {
 	cmd.Flags().Duration("timeout", 30*time.Second, "Execution timeout")
 	cmd.Flags().Bool("kv", false, "Enable key-value store")
 	cmd.Flags().StringSlice("allow-host", nil, "Allow HTTP to host (repeatable)")
 	cmd.Flags().StringSlice("mount", nil, "Mount filesystem virtual:host:mode (repeatable)")
 	cmd.Flags().String("memory", "256mb", "Memory limit: 1mb, 16mb, 64mb, 256mb, 1gb")
+	cmd.Flags().String("packages", "", "Path to packages directory (Python)")
+	cmd.Flags().Bool("allow-pkg-install", false, "Allow runtime package installation (Python)")
+	cmd.Flags().StringSlice("allow-pkg", nil, "Allow specific package (repeatable, implies --allow-pkg-install)")
 
 	// Security limits
 	cmd.Flags().Int("http-max-url", 8192, "Max HTTP URL length")
@@ -46,20 +53,57 @@ func addRunFlags(cmd *cobra.Command) {
 	cmd.Flags().Int("fs-max-path", 4096, "Max path length")
 }
 
-func runRun(cmd *cobra.Command, args []string) {
-	code, _ := cmd.Flags().GetString("code")
-	lang, _ := cmd.Flags().GetString("lang")
+func buildSessionOpts(cmd *cobra.Command) []executor.SessionOption {
 	timeout, _ := cmd.Flags().GetDuration("timeout")
-	noCache, _ := cmd.Flags().GetBool("no-cache")
 	enableKV, _ := cmd.Flags().GetBool("kv")
 	allowedHosts, _ := cmd.Flags().GetStringSlice("allow-host")
 	mounts, _ := cmd.Flags().GetStringSlice("mount")
+	packages, _ := cmd.Flags().GetString("packages")
+	allowPkgInstall, _ := cmd.Flags().GetBool("allow-pkg-install")
+	allowPkgs, _ := cmd.Flags().GetStringSlice("allow-pkg")
 
 	httpMaxURL, _ := cmd.Flags().GetInt("http-max-url")
 	httpMaxBody, _ := cmd.Flags().GetInt64("http-max-body")
 	fsMaxFile, _ := cmd.Flags().GetInt64("fs-max-file")
-	fsMaxWrite, _ := cmd.Flags().GetInt64("fs-max-write")
-	fsMaxPath, _ := cmd.Flags().GetInt("fs-max-path")
+
+	var opts []executor.SessionOption
+	opts = append(opts, executor.WithSessionTimeout(timeout))
+
+	if enableKV {
+		opts = append(opts, executor.WithSessionKV())
+	}
+	if len(allowedHosts) > 0 {
+		opts = append(opts, executor.WithSessionAllowedHosts(allowedHosts))
+		opts = append(opts, executor.WithSessionHTTPMaxURLLength(httpMaxURL))
+		opts = append(opts, executor.WithSessionHTTPMaxBodySize(httpMaxBody))
+	}
+	for _, spec := range mounts {
+		m, err := parseMount(spec)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+			os.Exit(1)
+		}
+		opts = append(opts, executor.WithSessionMount(m.VirtualPath, m.HostPath, m.Mode))
+	}
+	if fsMaxFile > 0 {
+		opts = append(opts, executor.WithSessionFSMaxFileSize(fsMaxFile))
+	}
+	if packages != "" {
+		opts = append(opts, executor.WithPackages(packages))
+	}
+	if len(allowPkgs) > 0 {
+		opts = append(opts, executor.WithAllowedPackages(allowPkgs))
+	} else if allowPkgInstall {
+		opts = append(opts, executor.WithPackageInstall(true))
+	}
+
+	return opts
+}
+
+func runRun(cmd *cobra.Command, args []string) {
+	code, _ := cmd.Flags().GetString("code")
+	lang, _ := cmd.Flags().GetString("lang")
+	noCache, _ := cmd.Flags().GetBool("no-cache")
 	memoryLimit, _ := cmd.Flags().GetString("memory")
 
 	var source string
@@ -118,35 +162,15 @@ func runRun(cmd *cobra.Command, args []string) {
 	}
 	defer exec.Close()
 
-	var runOpts []executor.Option
-	runOpts = append(runOpts, executor.WithTimeout(timeout))
-
-	runOpts = append(runOpts,
-		executor.WithHTTPMaxURLLength(httpMaxURL),
-		executor.WithHTTPMaxBodySize(httpMaxBody),
-		executor.WithFSMaxFileSize(fsMaxFile),
-		executor.WithFSMaxWriteSize(fsMaxWrite),
-		executor.WithFSMaxPathLength(fsMaxPath),
-	)
-
-	if len(allowedHosts) > 0 {
-		runOpts = append(runOpts, executor.WithAllowedHosts(allowedHosts))
+	sessionOpts := buildSessionOpts(cmd)
+	session, err := exec.NewSession(language, sessionOpts...)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
 	}
+	defer session.Close()
 
-	if enableKV {
-		runOpts = append(runOpts, executor.WithKV())
-	}
-
-	for _, spec := range mounts {
-		m, err := parseMount(spec)
-		if err != nil {
-			fmt.Fprintf(os.Stderr, "Error: %v\n", err)
-			os.Exit(1)
-		}
-		runOpts = append(runOpts, executor.WithMount(m.VirtualPath, m.HostPath, m.Mode))
-	}
-
-	result := exec.Run(context.Background(), language, source, runOpts...)
+	result := session.Run(context.Background(), source)
 	fmt.Print(result.Output)
 
 	if result.Error != nil {

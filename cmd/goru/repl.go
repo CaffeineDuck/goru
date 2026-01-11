@@ -31,18 +31,16 @@ Type 'exit' or 'quit' to end the session, or press Ctrl+D.`,
 
 func init() {
 	replCmd.Flags().StringP("lang", "l", "", "Language: python, js (required)")
-	replCmd.Flags().String("packages", "", "Path to packages directory (Python only)")
-	replCmd.Flags().Bool("kv", false, "Enable key-value store")
 	replCmd.Flags().String("history", "", "History file path (default: ~/.goru_history)")
+	addSessionFlags(replCmd)
 	rootCmd.AddCommand(replCmd)
 }
 
 func runRepl(cmd *cobra.Command, args []string) {
 	lang, _ := cmd.Flags().GetString("lang")
-	packages, _ := cmd.Flags().GetString("packages")
-	noCache, _ := cmd.Root().PersistentFlags().GetBool("no-cache")
-	enableKV, _ := cmd.Flags().GetBool("kv")
 	historyFile, _ := cmd.Flags().GetString("history")
+	noCache, _ := cmd.Root().PersistentFlags().GetBool("no-cache")
+	memoryLimit, _ := cmd.Flags().GetString("memory")
 
 	if historyFile == "" {
 		home, _ := os.UserHomeDir()
@@ -60,6 +58,9 @@ func runRepl(cmd *cobra.Command, args []string) {
 	if !noCache {
 		execOpts = append(execOpts, executor.WithDiskCache())
 	}
+	if pages := parseMemoryLimit(memoryLimit); pages > 0 {
+		execOpts = append(execOpts, executor.WithMemoryLimit(pages))
+	}
 	execOpts = append(execOpts, executor.WithPrecompile(language))
 
 	exec, err := executor.New(registry, execOpts...)
@@ -69,14 +70,7 @@ func runRepl(cmd *cobra.Command, args []string) {
 	}
 	defer exec.Close()
 
-	var sessionOpts []executor.SessionOption
-	if packages != "" {
-		sessionOpts = append(sessionOpts, executor.WithPackages(packages))
-	}
-	if enableKV {
-		sessionOpts = append(sessionOpts, executor.WithSessionKV())
-	}
-
+	sessionOpts := buildSessionOpts(cmd)
 	session, err := exec.NewSession(language, sessionOpts...)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "Error starting session: %v\n", err)
