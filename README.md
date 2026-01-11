@@ -17,6 +17,24 @@ You need to execute user-submitted or AI-generated code. Your options:
 - **Plugin systems** - Let users extend your app with custom scripts
 - **Educational platforms** - Safe code playgrounds for students
 
+## Who It's NOT For
+
+- **High-performance computing** - WASM adds overhead; use native execution if you trust the code
+- **NumPy/Pandas workloads** - C extensions don't work in WASI; pure Python only
+- **Long-running processes** - Designed for short scripts, not daemons or servers
+- **Multi-threaded code** - WASI doesn't support threads
+
+## Limitations
+
+**Performance**: WASM interpretation adds ~2-10x overhead vs native. Cold starts are slow (~500ms Python, ~100ms JS). We mitigate with disk caching and session reuse.
+
+**WASI constraints**: No threads, no raw sockets, no FFI. Python's `multiprocessing`, `threading`, `socket`, `ssl` modules are blocked. C extensions (numpy, pandas) won't load.
+
+**Abstraction layer**: `http`, `fs`, `kv` modules are wrappers over host functions, not real stdlib. They're injected into the runtime and call back to Go. This means:
+- No `requests` library (use built-in `http` module instead)
+- No direct filesystem access (only mounted paths via `fs`)
+- Behavior may differ slightly from native equivalents
+
 ## Features
 
 - **Bidirectional host-guest protocol** - Sandboxed code calls Go functions via `call()`, Go receives structured responses ([docs](docs/sandbox-api.md#call))
