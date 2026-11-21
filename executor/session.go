@@ -223,6 +223,7 @@ func (s *Session) start() error {
 	s.stdinReader, s.stdin = io.Pipe()
 	s.stdout = &cappedOutput{}
 	s.protocol = newSessionProtocol(ctx, s.registry, s.stdin)
+	s.protocol.cancel = cancel
 
 	initCode := s.lang.SessionInit() + s.lang.WrapCode("")
 	args := s.lang.Args(initCode)

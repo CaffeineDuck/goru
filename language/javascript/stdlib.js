@@ -13,6 +13,8 @@ const _asyncBatch = {
   nextId: 0,
 
   queue(fn, args) {
+    if (this.pending.size >= 16) this.flush();
+    if (this.pending.size === 0) Promise.resolve().then(() => this.flush());
     const id = String(this.nextId++);
     const promise = new Promise((resolve, reject) => {
       this.pending.set(id, {resolve, reject});
