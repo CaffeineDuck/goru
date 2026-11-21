@@ -313,7 +313,7 @@ func TestSessionTimeNow(t *testing.T) {
 	}
 	defer exec.Close()
 
-	session, err := exec.NewSession(python.New())
+	session, err := exec.NewSession(python.New(), WithSessionClock())
 	if err != nil {
 		t.Fatalf("failed to create session: %v", err)
 	}

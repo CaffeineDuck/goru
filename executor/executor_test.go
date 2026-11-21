@@ -239,7 +239,7 @@ if now > 1577836800 and now < 4102444800:
     print("OK")
 else:
     print(f"FAIL: {now}")
-`)
+`, executor.WithClock())
 	if result.Error != nil {
 		t.Fatalf("unexpected error: %v", result.Error)
 	}
@@ -408,4 +408,3 @@ print(result is None)
 		t.Errorf("expected True (isolated stores), got %q", result.Output)
 	}
 }
-

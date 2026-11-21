@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"strconv"
 	"strings"
@@ -13,10 +14,15 @@ import (
 )
 
 const (
-	protocolPrefix      = "\x00GORU:"
-	protocolFlushPrefix = "\x00GORU_FLUSH:"
-	protocolSuffix      = "\x00"
+	protocolPrefix      = "GORU:"
+	protocolFlushPrefix = "GORU_FLUSH:"
+	maxFrameBytes       = 64 << 10
+	maxPendingCalls     = 16
+	maxResponseBytes    = 4 << 20
+	maxCaptureBytes     = 1 << 20
 )
+
+var errProtocolLimit = errors.New("goru protocol limit exceeded")
 
 type callRequest struct {
 	ID   string         `json:"id,omitempty"`
@@ -30,194 +36,196 @@ type callResponse struct {
 	Error string `json:"error,omitempty"`
 }
 
+type cappedOutput struct {
+	buf bytes.Buffer
+	mu  sync.Mutex
+}
+
+func (o *cappedOutput) Write(data []byte) (int, error) {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.buf.Write(data[:min(len(data), maxCaptureBytes-o.buf.Len())])
+	return len(data), nil
+}
+
+func (o *cappedOutput) String() string {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	return o.buf.String()
+}
+
+func (o *cappedOutput) Reset() {
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	o.buf.Reset()
+}
+
 type protocolHandler struct {
 	ctx         context.Context
 	registry    *hostfunc.Registry
 	stdinWriter *io.PipeWriter
-	realStderr  bytes.Buffer
-	buf         bytes.Buffer
+	realStderr  cappedOutput
+	frame       []byte
+	framing     bool
+	matched     bool
 	pending     []callRequest
+	active      chan struct{}
+	session     *sessionProtocol
 	mu          sync.Mutex
 	writeMu     sync.Mutex
+	err         error
 }
 
 func newProtocolHandler(ctx context.Context, registry *hostfunc.Registry, stdinWriter *io.PipeWriter) *protocolHandler {
 	return &protocolHandler{
-		ctx:         ctx,
-		registry:    registry,
-		stdinWriter: stdinWriter,
-		pending:     make([]callRequest, 0),
+		ctx: ctx, registry: registry, stdinWriter: stdinWriter,
+		active: make(chan struct{}, maxPendingCalls),
 	}
-}
-
-type messageType int
-
-const (
-	messageNone messageType = iota
-	messageCall
-	messageFlush
-)
-
-func findNextMessage(content string) (idx int, msgType messageType) {
-	flushIdx := strings.Index(content, protocolFlushPrefix)
-	callIdx := strings.Index(content, protocolPrefix)
-
-	switch {
-	case flushIdx == -1 && callIdx == -1:
-		return -1, messageNone
-	case flushIdx == -1:
-		return callIdx, messageCall
-	case callIdx == -1:
-		return flushIdx, messageFlush
-	case flushIdx < callIdx:
-		return flushIdx, messageFlush
-	default:
-		return callIdx, messageCall
-	}
-}
-
-func extractMessage(content string, idx int, prefix string) (payload, remaining string, ok bool) {
-	afterPrefix := content[idx+len(prefix):]
-	payload, remaining, ok = strings.Cut(afterPrefix, protocolSuffix)
-	if !ok {
-		return "", content[idx:], false
-	}
-	return payload, remaining, true
 }
 
 func (p *protocolHandler) Write(data []byte) (int, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	p.buf.Write(data)
-
-	for {
-		content := p.buf.String()
-		idx, msgType := findNextMessage(content)
-
-		if msgType == messageNone {
-			p.realStderr.WriteString(content)
-			p.buf.Reset()
+	total := len(data)
+	for len(data) > 0 && p.err == nil {
+		if p.framing && !p.matched {
+			ch := data[0]
+			if ch != 0 {
+				p.frame = append(p.frame, ch)
+				data = data[1:]
+				if p.matchPrefix() {
+					continue
+				}
+			}
+			p.realStderr.Write([]byte{0})
+			p.realStderr.Write(p.frame)
+			p.frame = p.frame[:0]
+			p.framing = false
+			continue
+		}
+		n := bytes.IndexByte(data, 0)
+		if n < 0 {
+			n = len(data)
+		}
+		if p.framing {
+			if len(p.frame)+n > maxFrameBytes {
+				p.fail(errProtocolLimit)
+				break
+			}
+			p.frame = append(p.frame, data[:n]...)
+			if n < len(data) {
+				p.handleFrame(string(p.frame))
+				p.frame = p.frame[:0]
+				p.matched = false
+			}
+		} else {
+			p.realStderr.Write(data[:n])
+		}
+		if n == len(data) {
 			break
 		}
+		p.framing = !p.framing
+		data = data[n+1:]
+	}
+	return total, p.err
+}
 
-		if idx > 0 {
-			p.realStderr.WriteString(content[:idx])
+func (p *protocolHandler) matchPrefix() bool {
+	candidate := string(p.frame)
+	for _, prefix := range [...]string{protocolPrefix, protocolFlushPrefix,
+		"GORU_READY", "GORU_DONE", "GORU_ERROR:", "GORU_COMPLETE", "GORU_INCOMPLETE"} {
+		if strings.HasPrefix(prefix, candidate) {
+			p.matched = prefix == candidate
+			return true
 		}
-
-		switch msgType {
-		case messageFlush:
-			if !p.processFlushMessage(content, idx) {
-				return len(data), nil
-			}
-		case messageCall:
-			if !p.processCallMessage(content, idx) {
-				return len(data), nil
-			}
-		}
 	}
-
-	return len(data), nil
+	return false
 }
 
-func (p *protocolHandler) processFlushMessage(content string, idx int) bool {
-	payload, remaining, ok := extractMessage(content, idx, protocolFlushPrefix)
-	if !ok {
-		p.buf.Reset()
-		p.buf.WriteString(remaining)
-		return false
-	}
-
-	p.buf.Reset()
-	p.buf.WriteString(remaining)
-
-	count, err := strconv.Atoi(payload)
-	if err != nil || count <= 0 {
-		return true
-	}
-
-	p.handleFlush(count)
-	return true
-}
-
-func (p *protocolHandler) processCallMessage(content string, idx int) bool {
-	payload, remaining, ok := extractMessage(content, idx, protocolPrefix)
-	if !ok {
-		p.buf.Reset()
-		p.buf.WriteString(remaining)
-		return false
-	}
-
-	p.buf.Reset()
-	p.buf.WriteString(remaining)
-
-	var req callRequest
-	if err := json.Unmarshal([]byte(payload), &req); err != nil {
-		p.respond(callResponse{Error: "invalid call format"})
-		return true
-	}
-
-	if req.ID != "" {
-		p.pending = append(p.pending, req)
-	} else {
-		p.respond(p.handleCall(req))
-	}
-	return true
-}
-
-func (p *protocolHandler) handleFlush(count int) {
-	if count > len(p.pending) {
-		count = len(p.pending)
-	}
-	if count == 0 {
+func (p *protocolHandler) fail(err error) {
+	if p.err != nil {
 		return
 	}
-
-	requests := p.pending[:count]
-	p.pending = p.pending[count:]
-
-	var wg sync.WaitGroup
-	wg.Add(len(requests))
-
-	for _, req := range requests {
-		go func(r callRequest) {
-			defer wg.Done()
-			resp := p.handleCall(r)
-			resp.ID = r.ID
-			p.respond(resp)
-		}(req)
+	p.err = err
+	p.stdinWriter.CloseWithError(err)
+	if p.session != nil {
+		close(p.session.failed)
 	}
-
-	wg.Wait()
 }
 
-func (p *protocolHandler) respond(resp callResponse) {
-	data, err := json.Marshal(resp)
-	if err != nil {
-		data = []byte(`{"error":"internal: failed to marshal response"}`)
+func (p *protocolHandler) handleFrame(frame string) {
+	if payload, ok := strings.CutPrefix(frame, protocolPrefix); ok {
+		var req callRequest
+		if err := json.Unmarshal([]byte(payload), &req); err != nil {
+			p.submit(callRequest{}, false)
+			return
+		}
+		if len(p.pending)+len(p.active) >= maxPendingCalls {
+			p.fail(errProtocolLimit)
+			return
+		}
+		if req.ID == "" {
+			p.submit(req, true)
+			return
+		}
+		p.pending = append(p.pending, req)
+		return
+	}
+	if payload, ok := strings.CutPrefix(frame, protocolFlushPrefix); ok {
+		count, err := strconv.Atoi(payload)
+		if err != nil || count <= 0 {
+			return
+		}
+		for _, req := range p.pending[:min(count, len(p.pending))] {
+			if p.err != nil {
+				break
+			}
+			p.submit(req, true)
+		}
+		count = min(count, len(p.pending))
+		clear(p.pending[:count])
+		p.pending = p.pending[count:]
+		return
+	}
+	if p.session != nil && p.session.signal(frame) {
+		return
+	}
+	p.realStderr.Write([]byte{0})
+	p.realStderr.Write([]byte(frame))
+	p.realStderr.Write([]byte{0})
+}
+
+func (p *protocolHandler) submit(req callRequest, valid bool) {
+	select {
+	case p.active <- struct{}{}:
+	default:
+		p.fail(errProtocolLimit)
+		return
 	}
 	go func() {
+		defer func() { <-p.active }()
+		resp := callResponse{ID: req.ID, Error: "invalid call format"}
+		if valid {
+			resp = callResponse{ID: req.ID}
+			if fn, ok := p.registry.Get(req.Fn); ok {
+				result, err := fn(p.ctx, req.Args)
+				if err != nil {
+					resp.Error = err.Error()
+				} else {
+					resp.Data = result
+				}
+			} else {
+				resp.Error = "unknown function: " + req.Fn
+			}
+		}
+		data := encodeResponse(resp)
 		p.writeMu.Lock()
 		defer p.writeMu.Unlock()
 		p.stdinWriter.Write(append(data, '\n'))
 	}()
 }
 
-func (p *protocolHandler) handleCall(req callRequest) callResponse {
-	fn, ok := p.registry.Get(req.Fn)
-	if !ok {
-		return callResponse{Error: "unknown function: " + req.Fn}
-	}
-
-	result, err := fn(p.ctx, req.Args)
-	if err != nil {
-		return callResponse{Error: err.Error()}
-	}
-	return callResponse{Data: result}
-}
-
 func (p *protocolHandler) Stderr() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
 	return p.realStderr.String()
 }

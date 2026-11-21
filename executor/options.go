@@ -1,6 +1,7 @@
 package executor
 
 import (
+	"context"
 	"time"
 
 	"github.com/caffeineduck/goru/hostfunc"
@@ -10,12 +11,13 @@ import (
 type Option func(*runConfig)
 
 type runConfig struct {
-	timeout    time.Duration
-	mounts     []hostfunc.Mount
-	fsOptions  []hostfunc.FSOption
-	httpConfig hostfunc.HTTPConfig
-	kvEnabled  bool
-	kvConfig   hostfunc.KVConfig
+	timeout      time.Duration
+	clockEnabled bool
+	mounts       []hostfunc.Mount
+	fsOptions    []hostfunc.FSOption
+	httpConfig   hostfunc.HTTPConfig
+	kvEnabled    bool
+	kvConfig     hostfunc.KVConfig
 }
 
 func defaultRunConfig() runConfig {
@@ -127,6 +129,7 @@ func WithKVConfig(cfg hostfunc.KVConfig) Option {
 type ExecutorOption func(*executorConfig)
 
 type executorConfig struct {
+	engine           Engine
 	diskCache        bool
 	cacheDir         string
 	precompile       []Language // Languages to precompile at startup
@@ -181,3 +184,31 @@ const (
 	MemoryLimit256MB uint32 = 4096  // 256 MB (4096 pages) - default
 	MemoryLimit1GB   uint32 = 16384 // 1 GB (16384 pages)
 )
+
+// Engine selects the WASM execution engine.
+type Engine string
+
+const (
+	EngineAuto        Engine = ""
+	EngineCompiler    Engine = "compiler"
+	EngineInterpreter Engine = "interpreter"
+)
+
+// WithEngine selects an engine explicitly. The default remains auto.
+func WithEngine(engine Engine) ExecutorOption {
+	return func(c *executorConfig) { c.engine = engine }
+}
+
+// WithClock enables the time_now host call for a single execution.
+func WithClock() Option {
+	return func(c *runConfig) { c.clockEnabled = true }
+}
+
+// WithSessionClock enables the time_now host call in a session.
+func WithSessionClock() SessionOption {
+	return func(c *sessionConfig) { c.clockEnabled = true }
+}
+
+func realTime(context.Context, map[string]any) (any, error) {
+	return float64(time.Now().UnixNano()) / 1e9, nil
+}

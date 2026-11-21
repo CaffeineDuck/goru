@@ -279,7 +279,8 @@ if _packages_path:
 
 def _apply_runtime_patches():
     """Apply patches - now safe since asyncio is already imported at module level."""
-    _time_module.time = time_now
+    if _os.environ.get("GORU_REAL_CLOCK") == "1":
+        _time_module.time = time_now
     _asyncio_module.run = run_async
 
 def _session_loop():
@@ -360,6 +361,4 @@ if globals().get("_GORU_SESSION_MODE") or _os.environ.get("GORU_SESSION") == "1"
     _apply_runtime_patches()
     _session_loop()
 else:
-    # Non-session mode: apply patches immediately for standalone execution
-    _time_module.time = time_now
-    _asyncio_module.run = run_async
+    _apply_runtime_patches()
