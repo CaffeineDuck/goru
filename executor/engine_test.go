@@ -3,10 +3,12 @@ package executor_test
 import (
 	"context"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/caffeineduck/goru/executor"
 	"github.com/caffeineduck/goru/language/javascript"
+	"github.com/tetratelabs/wazero/experimental"
 )
 
 func TestExplicitEngines(t *testing.T) {
@@ -60,5 +62,26 @@ func TestClockOptIn(t *testing.T) {
 		}
 		check(s.Run(ctx, code), tc.want)
 		s.Close()
+	}
+}
+
+func TestRunClosesSuccessfulInstances(t *testing.T) {
+	e, err := executor.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	var closes atomic.Int32
+	ctx := experimental.WithCloseNotifier(context.Background(), experimental.CloseNotifyFunc(func(context.Context, uint32) {
+		closes.Add(1)
+	}))
+	for i := int32(1); i <= 3; i++ {
+		r := e.Run(ctx, javascript.New(), "console.log(42)", executor.WithTimeout(0))
+		if r.Error != nil {
+			t.Fatal(r.Error)
+		}
+		if closes.Load() != i {
+			t.Fatalf("completed guest instances closed: %d, want %d", closes.Load(), i)
+		}
 	}
 }

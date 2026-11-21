@@ -176,7 +176,13 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 	defer stop()
 	defer stdinReader.Close()
 	defer stdinWriter.Close()
-	_, err = e.runtime.InstantiateModule(ctx, compiled, moduleConfig)
+	instance, err := e.runtime.InstantiateModule(ctx, compiled, moduleConfig)
+	if instance != nil {
+		closeErr := instance.Close(context.Background())
+		if err == nil {
+			err = closeErr
+		}
+	}
 	if protocol.err != nil {
 		err = protocol.err
 	}
