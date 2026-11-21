@@ -154,9 +154,12 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		registry.Register("fs_stat", fs.Stat)
 	}
 
+	ctx, cancelGuest := context.WithCancel(ctx)
+	defer cancelGuest()
 	var stdout cappedOutput
 	stdinReader, stdinWriter := io.Pipe()
 	protocol := newProtocolHandler(ctx, registry, stdinWriter)
+	protocol.cancel = cancelGuest
 
 	wrappedCode := lang.WrapCode(code)
 	args := lang.Args(wrappedCode)
@@ -183,16 +186,14 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 			err = closeErr
 		}
 	}
-	if protocol.err != nil {
-		err = protocol.err
-	}
-
 	result := Result{
 		Output:   stdout.String() + protocol.Stderr(),
 		Duration: time.Since(start),
 	}
 
-	if err != nil {
+	if protocol.err != nil {
+		result.Error = protocol.err
+	} else if err != nil {
 		if ctx.Err() == context.DeadlineExceeded {
 			result.Error = fmt.Errorf("timeout after %v", cfg.timeout)
 		} else {

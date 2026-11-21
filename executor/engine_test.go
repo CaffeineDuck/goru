@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/caffeineduck/goru/executor"
+	"github.com/caffeineduck/goru/hostfunc"
 	"github.com/caffeineduck/goru/language/javascript"
 	"github.com/tetratelabs/wazero/experimental"
 )
@@ -83,5 +84,24 @@ func TestRunClosesSuccessfulInstances(t *testing.T) {
 		if closes.Load() != i {
 			t.Fatalf("completed guest instances closed: %d, want %d", closes.Load(), i)
 		}
+	}
+}
+
+func TestLargeAsyncBatch(t *testing.T) {
+	registry := hostfunc.NewRegistry()
+	registry.Register("echo", func(_ context.Context, args map[string]any) (any, error) {
+		return args["value"], nil
+	})
+	e, err := executor.New(registry)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer e.Close()
+	result := e.Run(context.Background(), javascript.New(), `
+Promise.all(Array.from({length: 40}, (_, value) => asyncCall("echo", {value})))
+    .then(values => console.log(values.length, values.every((value, index) => value === index)));
+`)
+	if result.Error != nil || strings.TrimSpace(result.Output) != "40 true" {
+		t.Fatalf("execution: %+v", result)
 	}
 }

@@ -15,6 +15,8 @@ class _AsyncBatch:
         self.next_id = 0
 
     def queue(self, fn, args, future):
+        if len(self.pending) >= 16:
+            self.flush()
         req_id = str(self.next_id)
         self.next_id += 1
         self.pending[req_id] = future

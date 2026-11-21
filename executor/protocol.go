@@ -22,7 +22,8 @@ const (
 	maxCaptureBytes     = 1 << 20
 )
 
-var errProtocolLimit = errors.New("goru protocol limit exceeded")
+// ErrProtocolLimit indicates that execution stopped at a guest protocol limit.
+var ErrProtocolLimit = errors.New("protocol-limit: goru protocol limit exceeded")
 
 type callRequest struct {
 	ID   string         `json:"id,omitempty"`
@@ -60,6 +61,11 @@ func (o *cappedOutput) Reset() {
 	o.buf.Reset()
 }
 
+type protocolJob struct {
+	request callRequest
+	valid   bool
+}
+
 type protocolHandler struct {
 	ctx         context.Context
 	registry    *hostfunc.Registry
@@ -69,7 +75,9 @@ type protocolHandler struct {
 	framing     bool
 	matched     bool
 	pending     []callRequest
-	active      chan struct{}
+	cancel      context.CancelFunc
+	jobs        chan protocolJob
+	workers     sync.Once
 	session     *sessionProtocol
 	mu          sync.Mutex
 	writeMu     sync.Mutex
@@ -79,7 +87,7 @@ type protocolHandler struct {
 func newProtocolHandler(ctx context.Context, registry *hostfunc.Registry, stdinWriter *io.PipeWriter) *protocolHandler {
 	return &protocolHandler{
 		ctx: ctx, registry: registry, stdinWriter: stdinWriter,
-		active: make(chan struct{}, maxPendingCalls),
+		jobs: make(chan protocolJob, maxPendingCalls),
 	}
 }
 
@@ -110,7 +118,7 @@ func (p *protocolHandler) Write(data []byte) (int, error) {
 		}
 		if p.framing {
 			if len(p.frame)+n > maxFrameBytes {
-				p.fail(errProtocolLimit)
+				p.fail(ErrProtocolLimit)
 				break
 			}
 			p.frame = append(p.frame, data[:n]...)
@@ -152,6 +160,9 @@ func (p *protocolHandler) fail(err error) {
 	if p.session != nil {
 		close(p.session.failed)
 	}
+	if p.cancel != nil {
+		p.cancel()
+	}
 }
 
 func (p *protocolHandler) handleFrame(frame string) {
@@ -161,8 +172,8 @@ func (p *protocolHandler) handleFrame(frame string) {
 			p.submit(callRequest{}, false)
 			return
 		}
-		if len(p.pending)+len(p.active) >= maxPendingCalls {
-			p.fail(errProtocolLimit)
+		if req.ID != "" && len(p.pending) >= maxPendingCalls {
+			p.fail(ErrProtocolLimit)
 			return
 		}
 		if req.ID == "" {
@@ -197,33 +208,51 @@ func (p *protocolHandler) handleFrame(frame string) {
 }
 
 func (p *protocolHandler) submit(req callRequest, valid bool) {
-	select {
-	case p.active <- struct{}{}:
-	default:
-		p.fail(errProtocolLimit)
-		return
-	}
-	go func() {
-		defer func() { <-p.active }()
-		resp := callResponse{ID: req.ID, Error: "invalid call format"}
-		if valid {
-			resp = callResponse{ID: req.ID}
-			if fn, ok := p.registry.Get(req.Fn); ok {
-				result, err := fn(p.ctx, req.Args)
-				if err != nil {
-					resp.Error = err.Error()
-				} else {
-					resp.Data = result
-				}
-			} else {
-				resp.Error = "unknown function: " + req.Fn
-			}
+	p.workers.Do(func() {
+		for i := 0; i < maxPendingCalls; i++ {
+			go p.serveJobs()
 		}
-		data := encodeResponse(resp)
-		p.writeMu.Lock()
-		defer p.writeMu.Unlock()
-		p.stdinWriter.Write(append(data, '\n'))
-	}()
+	})
+	select {
+	case p.jobs <- protocolJob{request: req, valid: valid}:
+	default:
+		p.fail(ErrProtocolLimit)
+	}
+}
+
+func (p *protocolHandler) serveJobs() {
+	for {
+		select {
+		case <-p.ctx.Done():
+			return
+		case job := <-p.jobs:
+			if p.ctx.Err() != nil {
+				return
+			}
+			p.reply(job.request, job.valid)
+		}
+	}
+}
+
+func (p *protocolHandler) reply(req callRequest, valid bool) {
+	resp := callResponse{ID: req.ID, Error: "invalid call format"}
+	if valid {
+		resp = callResponse{ID: req.ID}
+		if fn, ok := p.registry.Get(req.Fn); ok {
+			result, err := fn(p.ctx, req.Args)
+			if err != nil {
+				resp.Error = err.Error()
+			} else {
+				resp.Data = result
+			}
+		} else {
+			resp.Error = "unknown function: " + req.Fn
+		}
+	}
+	data := encodeResponse(resp)
+	p.writeMu.Lock()
+	defer p.writeMu.Unlock()
+	p.stdinWriter.Write(append(data, '\n'))
 }
 
 func (p *protocolHandler) Stderr() string {

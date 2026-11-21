@@ -125,7 +125,7 @@ func TestProtocolFrameLimit(t *testing.T) {
 	p.Write([]byte("\x00GORU:"))
 	for i := 0; i < maxFrameBytes; i++ {
 		if _, err := p.Write([]byte("x")); err != nil {
-			if !errors.Is(err, errProtocolLimit) || len(p.frame) > maxFrameBytes {
+			if !errors.Is(err, ErrProtocolLimit) || len(p.frame) > maxFrameBytes {
 				t.Fatalf("unexpected frame failure: %v", err)
 			}
 			return
@@ -145,7 +145,7 @@ func TestProtocolPendingLimit(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if _, err := p.Write(frame); !errors.Is(err, errProtocolLimit) {
+	if _, err := p.Write(frame); !errors.Is(err, ErrProtocolLimit) {
 		t.Fatalf("pending limit: %v", err)
 	}
 }
@@ -166,5 +166,18 @@ func TestProtocolOutputLimits(t *testing.T) {
 	var reply callResponse
 	if err := json.Unmarshal(data, &reply); err != nil || reply.ID != "1" || reply.Error == "" {
 		t.Fatalf("response limit: %q (%v)", data[:min(100, len(data))], err)
+	}
+}
+
+func TestProtocolFailureCancelsExecution(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	p := newProtocolHandler(ctx, nil, writer)
+	p.cancel = cancel
+	p.fail(ErrProtocolLimit)
+	if ctx.Err() != context.Canceled || !errors.Is(p.err, ErrProtocolLimit) {
+		t.Fatalf("execution context: %v, protocol error: %v", ctx.Err(), p.err)
 	}
 }
