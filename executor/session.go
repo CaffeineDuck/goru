@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/caffeineduck/goru/hostfunc"
 	"github.com/tetratelabs/wazero"
-	"github.com/tetratelabs/wazero/api"
 )
 
 // Session errors.
@@ -32,9 +30,9 @@ type Session struct {
 
 	stdin       *io.PipeWriter
 	stdinReader *io.PipeReader
-	stdout      *sessionOutput
+	stdout      *cappedOutput
 	protocol    *sessionProtocol
-	module      api.Module
+	cancel      context.CancelFunc
 
 	mu       sync.Mutex
 	execMu   sync.Mutex
@@ -45,6 +43,7 @@ type Session struct {
 
 type sessionConfig struct {
 	timeout         time.Duration
+	clockEnabled    bool
 	mounts          []hostfunc.Mount
 	fsOptions       []hostfunc.FSOption
 	httpConfig      hostfunc.HTTPConfig
@@ -167,6 +166,9 @@ func (e *Executor) NewSession(lang Language, opts ...SessionOption) (*Session, e
 	}
 
 	cfg.env["GORU_SESSION"] = "1"
+	if cfg.clockEnabled {
+		cfg.env["GORU_REAL_CLOCK"] = "1"
+	}
 
 	if cfg.packagesPath != "" {
 		cfg.mounts = append(cfg.mounts, hostfunc.Mount{
@@ -206,10 +208,12 @@ func (s *Session) start() error {
 		return nil
 	}
 
-	ctx := context.Background()
+	ctx, cancel := context.WithCancel(context.Background())
+	s.cancel = cancel
 
 	compiled, err := s.exec.getCompiled(ctx, s.lang)
 	if err != nil {
+		cancel()
 		s.startErr = err
 		return err
 	}
@@ -217,7 +221,7 @@ func (s *Session) start() error {
 	s.registerHostFunctions()
 
 	s.stdinReader, s.stdin = io.Pipe()
-	s.stdout = newSessionOutput()
+	s.stdout = &cappedOutput{}
 	s.protocol = newSessionProtocol(ctx, s.registry, s.stdin)
 
 	initCode := s.lang.SessionInit() + s.lang.WrapCode("")
@@ -234,31 +238,34 @@ func (s *Session) start() error {
 		moduleConfig = moduleConfig.WithEnv(k, v)
 	}
 
+	exit := make(chan error, 1)
 	go func() {
-		mod, err := s.exec.runtime.InstantiateModule(ctx, compiled, moduleConfig)
-		if err != nil {
-			s.mu.Lock()
-			s.startErr = fmt.Errorf("start session: %w", err)
-			s.mu.Unlock()
-			return
-		}
-		s.module = mod
+		_, err := s.exec.runtime.InstantiateModule(ctx, compiled, moduleConfig)
+		s.stdinReader.Close()
+		exit <- err
 	}()
 
 	select {
-	case <-s.protocol.Ready():
+	case <-s.protocol.readyCh:
 		s.started = true
 		return nil
+	case err := <-exit:
+		s.startErr = fmt.Errorf("session exited before ready: %v", err)
+	case <-s.protocol.failed:
+		s.startErr = s.protocol.err
 	case <-time.After(30 * time.Second):
 		s.startErr = errors.New("session start timeout")
-		return s.startErr
 	}
+	cancel()
+	s.stdinReader.Close()
+	s.stdin.Close()
+	return s.startErr
 }
 
 func (s *Session) registerHostFunctions() {
-	s.registry.Register("time_now", func(ctx context.Context, args map[string]any) (any, error) {
-		return float64(time.Now().UnixNano()) / 1e9, nil
-	})
+	if s.cfg.clockEnabled {
+		s.registry.Register("time_now", realTime)
+	}
 
 	if s.cfg.kvEnabled {
 		kv := hostfunc.NewKV(s.cfg.kvConfig)
@@ -320,7 +327,7 @@ func (s *Session) runInternal(ctx context.Context, code string, replMode bool) R
 
 	start := time.Now()
 
-	if s.closed {
+	if s.isClosed() {
 		return Result{Error: ErrSessionClosed, Duration: time.Since(start)}
 	}
 
@@ -344,6 +351,8 @@ func (s *Session) runInternal(ctx context.Context, code string, replMode bool) R
 	}
 	cmdBytes = append(cmdBytes, '\n')
 
+	stop := context.AfterFunc(ctx, func() { s.Close() })
+	defer stop()
 	if _, err := s.stdin.Write(cmdBytes); err != nil {
 		return Result{Error: fmt.Errorf("write command: %w", err), Duration: time.Since(start)}
 	}
@@ -355,7 +364,9 @@ func (s *Session) runInternal(ctx context.Context, code string, replMode bool) R
 			Error:    fmt.Errorf("timeout after %v", s.cfg.timeout),
 			Duration: time.Since(start),
 		}
-	case execErr := <-s.protocol.Done():
+	case <-s.protocol.failed:
+		return Result{Error: s.protocol.err, Duration: time.Since(start)}
+	case execErr := <-s.protocol.doneCh:
 		return Result{
 			Output:   s.stdout.String() + s.protocol.Stderr(),
 			Error:    execErr,
@@ -369,7 +380,7 @@ func (s *Session) CheckComplete(ctx context.Context, code string) (bool, error) 
 	s.execMu.Lock()
 	defer s.execMu.Unlock()
 
-	if s.closed {
+	if s.isClosed() {
 		return false, ErrSessionClosed
 	}
 
@@ -386,6 +397,8 @@ func (s *Session) CheckComplete(ctx context.Context, code string) (bool, error) 
 	}
 	cmdBytes = append(cmdBytes, '\n')
 
+	stop := context.AfterFunc(ctx, func() { s.Close() })
+	defer stop()
 	if _, err := s.stdin.Write(cmdBytes); err != nil {
 		return false, fmt.Errorf("write command: %w", err)
 	}
@@ -393,9 +406,17 @@ func (s *Session) CheckComplete(ctx context.Context, code string) (bool, error) 
 	select {
 	case <-ctx.Done():
 		return false, ctx.Err()
-	case complete := <-s.protocol.CheckDone():
+	case <-s.protocol.failed:
+		return false, s.protocol.err
+	case complete := <-s.protocol.checkCh:
 		return complete, nil
 	}
+}
+
+func (s *Session) isClosed() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.closed
 }
 
 // Close terminates the session and releases resources.
@@ -417,326 +438,77 @@ func (s *Session) Close() error {
 		s.stdin.Close()
 	}
 
-	// Close the module if it's still running
-	if s.module != nil {
-		s.module.Close(context.Background())
+	if s.cancel != nil {
+		s.cancel()
 	}
 
 	return nil
 }
 
-type sessionOutput struct {
-	buf bytes.Buffer
-	mu  sync.Mutex
-}
-
-func newSessionOutput() *sessionOutput {
-	return &sessionOutput{}
-}
-
-func (o *sessionOutput) Write(data []byte) (int, error) {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.buf.Write(data)
-}
-
-func (o *sessionOutput) String() string {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	return o.buf.String()
-}
-
-func (o *sessionOutput) Reset() {
-	o.mu.Lock()
-	defer o.mu.Unlock()
-	o.buf.Reset()
-}
-
-const (
-	sessionDoneSignal       = "\x00GORU_DONE\x00"
-	sessionErrorPrefix      = "\x00GORU_ERROR:"
-	sessionReadySignal      = "\x00GORU_READY\x00"
-	sessionCompleteSignal   = "\x00GORU_COMPLETE\x00"
-	sessionIncompleteSignal = "\x00GORU_INCOMPLETE\x00"
-)
-
 type sessionProtocol struct {
-	ctx         context.Context
-	registry    *hostfunc.Registry
-	stdinWriter *io.PipeWriter
-
-	buf        bytes.Buffer
-	realStderr bytes.Buffer
-	pending    []callRequest
-
-	readyCh   chan struct{}
-	doneCh    chan error
-	checkCh   chan bool
-	ready     bool
-
-	mu      sync.Mutex
-	writeMu sync.Mutex
+	*protocolHandler
+	readyCh chan struct{}
+	doneCh  chan error
+	checkCh chan bool
+	failed  chan struct{}
+	ready   bool
 }
 
 func newSessionProtocol(ctx context.Context, registry *hostfunc.Registry, stdinWriter *io.PipeWriter) *sessionProtocol {
-	return &sessionProtocol{
-		ctx:         ctx,
-		registry:    registry,
-		stdinWriter: stdinWriter,
-		pending:     make([]callRequest, 0),
-		readyCh:     make(chan struct{}),
-		doneCh:      make(chan error, 1),
-		checkCh:     make(chan bool, 1),
+	p := &sessionProtocol{
+		protocolHandler: newProtocolHandler(ctx, registry, stdinWriter),
+		readyCh:         make(chan struct{}),
+		doneCh:          make(chan error, 1),
+		checkCh:         make(chan bool, 1),
+		failed:          make(chan struct{}),
 	}
+	p.protocolHandler.session = p
+	return p
 }
 
-func (p *sessionProtocol) Write(data []byte) (int, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
-	n := len(data)
-	p.buf.Write(data)
-
-	for {
-		content := p.buf.String()
-
-		if p.checkSessionSignals(content) {
-			continue
-		}
-
-		if p.processProtocolMessages(content) {
-			continue
-		}
-
-		break
-	}
-
-	return n, nil
-}
-
-func (p *sessionProtocol) checkSessionSignals(content string) bool {
-	if idx := strings.Index(content, sessionReadySignal); idx != -1 {
-		if idx > 0 {
-			p.realStderr.WriteString(content[:idx])
-		}
-		p.buf.Reset()
-		p.buf.WriteString(content[idx+len(sessionReadySignal):])
-
+func (p *sessionProtocol) signal(frame string) bool {
+	switch frame {
+	case "GORU_READY":
 		if !p.ready {
 			p.ready = true
 			close(p.readyCh)
 		}
-		return true
-	}
-
-	if idx := strings.Index(content, sessionCompleteSignal); idx != -1 {
-		if idx > 0 {
-			p.realStderr.WriteString(content[:idx])
-		}
-		p.buf.Reset()
-		p.buf.WriteString(content[idx+len(sessionCompleteSignal):])
-
+	case "GORU_COMPLETE", "GORU_INCOMPLETE":
 		select {
-		case p.checkCh <- true:
+		case p.checkCh <- frame == "GORU_COMPLETE":
 		default:
 		}
-		return true
-	}
-
-	if idx := strings.Index(content, sessionIncompleteSignal); idx != -1 {
-		if idx > 0 {
-			p.realStderr.WriteString(content[:idx])
-		}
-		p.buf.Reset()
-		p.buf.WriteString(content[idx+len(sessionIncompleteSignal):])
-
-		select {
-		case p.checkCh <- false:
-		default:
-		}
-		return true
-	}
-
-	if idx := strings.Index(content, sessionDoneSignal); idx != -1 {
-		if idx > 0 {
-			p.realStderr.WriteString(content[:idx])
-		}
-		p.buf.Reset()
-		p.buf.WriteString(content[idx+len(sessionDoneSignal):])
-
+	case "GORU_DONE":
 		select {
 		case p.doneCh <- nil:
 		default:
 		}
-		return true
-	}
-
-	if idx := strings.Index(content, sessionErrorPrefix); idx != -1 {
-		afterPrefix := content[idx+len(sessionErrorPrefix):]
-		if endIdx := strings.Index(afterPrefix, "\x00"); endIdx != -1 {
-			errMsg := afterPrefix[:endIdx]
-			if idx > 0 {
-				p.realStderr.WriteString(content[:idx])
-			}
-			p.buf.Reset()
-			p.buf.WriteString(afterPrefix[endIdx+1:])
-
+	default:
+		if message, ok := strings.CutPrefix(frame, "GORU_ERROR:"); ok {
 			select {
-			case p.doneCh <- errors.New(errMsg):
+			case p.doneCh <- errors.New(message):
 			default:
 			}
-			return true
-		}
-	}
-
-	return false
-}
-
-func (p *sessionProtocol) processProtocolMessages(content string) bool {
-	idx, msgType := findNextMessage(content)
-	if msgType == messageNone {
-		return false
-	}
-
-	if idx > 0 {
-		p.realStderr.WriteString(content[:idx])
-		p.buf.Reset()
-		p.buf.WriteString(content[idx:])
-		content = p.buf.String()
-		idx = 0
-	}
-
-	switch msgType {
-	case messageFlush:
-		payload, remaining, ok := extractMessage(content, idx, protocolFlushPrefix)
-		if !ok {
+		} else {
 			return false
 		}
-		p.buf.Reset()
-		p.buf.WriteString(remaining)
-		p.handleFlush(payload)
-		return true
-
-	case messageCall:
-		payload, remaining, ok := extractMessage(content, idx, protocolPrefix)
-		if !ok {
-			return false
-		}
-		p.buf.Reset()
-		p.buf.WriteString(remaining)
-		p.handleCall(payload)
-		return true
 	}
-
-	return false
-}
-
-func (p *sessionProtocol) handleFlush(payload string) {
-	count := 0
-	fmt.Sscanf(payload, "%d", &count)
-	if count <= 0 || count > len(p.pending) {
-		count = len(p.pending)
-	}
-	if count == 0 {
-		return
-	}
-
-	requests := p.pending[:count]
-	p.pending = p.pending[count:]
-
-	var wg sync.WaitGroup
-	wg.Add(len(requests))
-
-	for _, req := range requests {
-		go func(r callRequest) {
-			defer wg.Done()
-			resp := p.executeCall(r)
-			resp.ID = r.ID
-			p.respond(resp)
-		}(req)
-	}
-
-	wg.Wait()
-}
-
-func (p *sessionProtocol) handleCall(payload string) {
-	var req callRequest
-	if err := json.Unmarshal([]byte(payload), &req); err != nil {
-		go p.respond(callResponse{Error: "invalid call format"})
-		return
-	}
-
-	if req.ID != "" {
-		p.pending = append(p.pending, req)
-	} else {
-		// Execute and respond in goroutine to avoid blocking Write()
-		go func() {
-			p.respond(p.executeCall(req))
-		}()
-	}
-}
-
-func (p *sessionProtocol) executeCall(req callRequest) callResponse {
-	fn, ok := p.registry.Get(req.Fn)
-	if !ok {
-		return callResponse{Error: "unknown function: " + req.Fn}
-	}
-
-	result, err := fn(p.ctx, req.Args)
-	if err != nil {
-		return callResponse{Error: err.Error()}
-	}
-	return callResponse{Data: result}
-}
-
-func (p *sessionProtocol) respond(resp callResponse) {
-	data, err := json.Marshal(resp)
-	if err != nil {
-		data = []byte(`{"error":"internal: failed to marshal response"}`)
-	}
-
-	p.writeMu.Lock()
-	defer p.writeMu.Unlock()
-	p.stdinWriter.Write(append(data, '\n'))
-}
-
-func (p *sessionProtocol) Ready() <-chan struct{} {
-	return p.readyCh
-}
-
-func (p *sessionProtocol) Done() <-chan error {
-	return p.doneCh
+	return true
 }
 
 func (p *sessionProtocol) ResetExec() {
 	p.mu.Lock()
 	defer p.mu.Unlock()
-
 	select {
 	case <-p.doneCh:
 	default:
 	}
-	p.doneCh = make(chan error, 1)
 	p.realStderr.Reset()
 }
 
 func (p *sessionProtocol) ResetCheck() {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	select {
 	case <-p.checkCh:
 	default:
 	}
-	p.checkCh = make(chan bool, 1)
-}
-
-func (p *sessionProtocol) CheckDone() <-chan bool {
-	return p.checkCh
-}
-
-func (p *sessionProtocol) Stderr() string {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	return p.realStderr.String()
 }

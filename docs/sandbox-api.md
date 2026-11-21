@@ -192,7 +192,7 @@ time.time()  # real host time (monkey-patched)
 
 **JavaScript:**
 ```javascript
-time_now()  // Unix timestamp
+time_now()  // Unix timestamp when explicitly enabled
 ```
 
 ---
@@ -244,3 +244,18 @@ goru bundled.js
 ### Type Definitions
 
 Copy `language/javascript/goru.d.ts` to your project for IDE autocomplete.
+
+## Runtime controls
+
+The host wall clock requires `executor.WithClock()` on a one-shot run or
+`executor.WithSessionClock()` on a session. Otherwise `time_now()` reports an
+unknown host function and Python uses its WASI default clock.
+
+`executor.WithEngine(executor.EngineCompiler)` and
+`executor.WithEngine(executor.EngineInterpreter)` select the WASM runtime at
+executor creation. The default uses wazero's platform selection.
+
+Guest protocol frames are limited to 64 KiB, with up to 16 pending or in-flight
+calls per guest. Output capture is limited to 1 MiB each for stdout and stderr.
+Each response frame is limited to 4 MiB. Trusted host callbacks are responsible
+for bounding their own allocations, including custom JSON encoders.

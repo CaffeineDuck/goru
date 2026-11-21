@@ -1,7 +1,6 @@
 package executor
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"io"
@@ -55,7 +54,18 @@ func New(registry *hostfunc.Registry, opts ...ExecutorOption) (*Executor, error)
 		}
 	}
 
-	rtConfig := wazero.NewRuntimeConfig().WithCloseOnContextDone(true)
+	var rtConfig wazero.RuntimeConfig
+	switch cfg.engine {
+	case EngineAuto:
+		rtConfig = wazero.NewRuntimeConfig()
+	case EngineCompiler:
+		rtConfig = wazero.NewRuntimeConfigCompiler()
+	case EngineInterpreter:
+		rtConfig = wazero.NewRuntimeConfigInterpreter()
+	default:
+		return nil, fmt.Errorf("unknown engine %q", cfg.engine)
+	}
+	rtConfig = rtConfig.WithCloseOnContextDone(true)
 	if cache != nil {
 		rtConfig = rtConfig.WithCompilationCache(cache)
 	}
@@ -109,14 +119,15 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		return Result{Error: err, Duration: time.Since(start)}
 	}
 
-	registry := e.registry
-	if registry == nil {
-		registry = hostfunc.NewRegistry()
+	registry := hostfunc.NewRegistry()
+	if e.registry != nil {
+		for name, fn := range e.registry.All() {
+			registry.Register(name, fn)
+		}
 	}
-
-	registry.Register("time_now", func(ctx context.Context, args map[string]any) (any, error) {
-		return float64(time.Now().UnixNano()) / 1e9, nil
-	})
+	if cfg.clockEnabled {
+		registry.Register("time_now", realTime)
+	}
 
 	if cfg.kvEnabled {
 		kv := hostfunc.NewKV(cfg.kvConfig)
@@ -143,7 +154,7 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		registry.Register("fs_stat", fs.Stat)
 	}
 
-	var stdout bytes.Buffer
+	var stdout cappedOutput
 	stdinReader, stdinWriter := io.Pipe()
 	protocol := newProtocolHandler(ctx, registry, stdinWriter)
 
@@ -157,14 +168,24 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 		WithArgs(args...).
 		WithName("")
 
-	errCh := make(chan error, 1)
-	go func() {
-		_, err := e.runtime.InstantiateModule(ctx, compiled, moduleConfig)
-		stdinWriter.Close()
-		errCh <- err
-	}()
+	if cfg.clockEnabled {
+		moduleConfig = moduleConfig.WithEnv("GORU_REAL_CLOCK", "1")
+	}
 
-	err = <-errCh
+	stop := context.AfterFunc(ctx, func() { stdinWriter.CloseWithError(ctx.Err()) })
+	defer stop()
+	defer stdinReader.Close()
+	defer stdinWriter.Close()
+	instance, err := e.runtime.InstantiateModule(ctx, compiled, moduleConfig)
+	if instance != nil {
+		closeErr := instance.Close(context.Background())
+		if err == nil {
+			err = closeErr
+		}
+	}
+	if protocol.err != nil {
+		err = protocol.err
+	}
 
 	result := Result{
 		Output:   stdout.String() + protocol.Stderr(),

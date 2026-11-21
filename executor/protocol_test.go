@@ -1,93 +1,13 @@
 package executor
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"io"
 	"strings"
 	"testing"
 )
-
-func TestFindNextMessage(t *testing.T) {
-	tests := []struct {
-		name        string
-		content     string
-		wantIdx     int
-		wantMsgType messageType
-	}{
-		{"no message", "hello world", -1, messageNone},
-		{"call message", "prefix\x00GORU:{}\x00suffix", 6, messageCall},
-		{"flush message", "prefix\x00GORU_FLUSH:5\x00suffix", 6, messageFlush},
-		{"call before flush", "\x00GORU:{}\x00\x00GORU_FLUSH:1\x00", 0, messageCall},
-		{"flush before call", "\x00GORU_FLUSH:1\x00\x00GORU:{}\x00", 0, messageFlush},
-		{"empty content", "", -1, messageNone},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			idx, msgType := findNextMessage(tt.content)
-			if idx != tt.wantIdx {
-				t.Errorf("idx = %d, want %d", idx, tt.wantIdx)
-			}
-			if msgType != tt.wantMsgType {
-				t.Errorf("msgType = %d, want %d", msgType, tt.wantMsgType)
-			}
-		})
-	}
-}
-
-func TestExtractMessage(t *testing.T) {
-	tests := []struct {
-		name          string
-		content       string
-		idx           int
-		prefix        string
-		wantPayload   string
-		wantRemaining string
-		wantOK        bool
-	}{
-		{
-			name:          "valid call",
-			content:       `prefix` + "\x00GORU:{\"fn\":\"test\"}\x00" + `suffix`,
-			idx:           6,
-			prefix:        protocolPrefix,
-			wantPayload:   `{"fn":"test"}`,
-			wantRemaining: "suffix",
-			wantOK:        true,
-		},
-		{
-			name:          "incomplete message",
-			content:       "prefix\x00GORU:{partial",
-			idx:           6,
-			prefix:        protocolPrefix,
-			wantPayload:   "",
-			wantRemaining: "\x00GORU:{partial",
-			wantOK:        false,
-		},
-		{
-			name:          "valid flush",
-			content:       "\x00GORU_FLUSH:10\x00remaining",
-			idx:           0,
-			prefix:        protocolFlushPrefix,
-			wantPayload:   "10",
-			wantRemaining: "remaining",
-			wantOK:        true,
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			payload, remaining, ok := extractMessage(tt.content, tt.idx, tt.prefix)
-			if payload != tt.wantPayload {
-				t.Errorf("payload = %q, want %q", payload, tt.wantPayload)
-			}
-			if remaining != tt.wantRemaining {
-				t.Errorf("remaining = %q, want %q", remaining, tt.wantRemaining)
-			}
-			if ok != tt.wantOK {
-				t.Errorf("ok = %v, want %v", ok, tt.wantOK)
-			}
-		})
-	}
-}
 
 func TestCallRequestJSON(t *testing.T) {
 	tests := []struct {
@@ -169,5 +89,82 @@ func TestCallResponseJSON(t *testing.T) {
 				t.Errorf("json = %q, want to contain %q", string(data), tt.wantJSON)
 			}
 		})
+	}
+}
+
+func TestProtocolSplitFrameAndStderr(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	p := newSessionProtocol(context.Background(), nil, writer)
+	for _, ch := range []byte("before\x00GORU_READY\x00after\x00GORU_DONE\x00") {
+		if _, err := p.Write([]byte{ch}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	select {
+	case <-p.readyCh:
+	default:
+		t.Fatal("split ready frame was lost")
+	}
+	select {
+	case <-p.doneCh:
+	default:
+		t.Fatal("split done frame was lost")
+	}
+	if p.Stderr() != "beforeafter" {
+		t.Fatalf("stderr = %q", p.Stderr())
+	}
+}
+
+func TestProtocolFrameLimit(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	p := newProtocolHandler(context.Background(), nil, writer)
+	p.Write([]byte("\x00GORU:"))
+	for i := 0; i < maxFrameBytes; i++ {
+		if _, err := p.Write([]byte("x")); err != nil {
+			if !errors.Is(err, errProtocolLimit) || len(p.frame) > maxFrameBytes {
+				t.Fatalf("unexpected frame failure: %v", err)
+			}
+			return
+		}
+	}
+	t.Fatal("oversized frame was retained")
+}
+
+func TestProtocolPendingLimit(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	p := newProtocolHandler(context.Background(), nil, writer)
+	frame := []byte("\x00GORU:{\"id\":\"1\",\"fn\":\"test\",\"args\":{}}\x00")
+	for i := 0; i < maxPendingCalls; i++ {
+		if _, err := p.Write(frame); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := p.Write(frame); !errors.Is(err, errProtocolLimit) {
+		t.Fatalf("pending limit: %v", err)
+	}
+}
+
+func TestProtocolOutputLimits(t *testing.T) {
+	reader, writer := io.Pipe()
+	defer reader.Close()
+	defer writer.Close()
+	p := newProtocolHandler(context.Background(), nil, writer)
+	chunk := []byte(strings.Repeat("x", maxCaptureBytes+1))
+	var stdout cappedOutput
+	stdout.Write(chunk)
+	p.Write(chunk)
+	if len(stdout.String()) != maxCaptureBytes || len(p.Stderr()) != maxCaptureBytes {
+		t.Fatal("output was not capped")
+	}
+	data := encodeResponse(callResponse{ID: "1", Data: map[string]any{"text": strings.Repeat("x", maxResponseBytes)}})
+	var reply callResponse
+	if err := json.Unmarshal(data, &reply); err != nil || reply.ID != "1" || reply.Error == "" {
+		t.Fatalf("response limit: %q (%v)", data[:min(100, len(data))], err)
 	}
 }

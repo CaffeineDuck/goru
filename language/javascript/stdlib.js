@@ -293,6 +293,7 @@ const _sessionLoop = () => {
 };
 
 if (globalThis._GORU_SESSION_MODE || std.getenv("GORU_SESSION") === "1") {
+  globalThis.time_now = time_now;
   std.err.puts("\x00GORU_READY\x00");
   std.err.flush();
   _sessionLoop();
