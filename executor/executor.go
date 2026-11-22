@@ -160,6 +160,7 @@ func (e *Executor) Run(ctx context.Context, lang Language, code string, opts ...
 	stdinReader, stdinWriter := io.Pipe()
 	protocol := newProtocolHandler(ctx, registry, stdinWriter)
 	protocol.cancel = cancelGuest
+	protocol.strict = cfg.strict
 
 	wrappedCode := lang.WrapCode(code)
 	args := lang.Args(wrappedCode)

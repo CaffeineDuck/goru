@@ -181,3 +181,24 @@ func TestProtocolFailureCancelsExecution(t *testing.T) {
 		t.Fatalf("execution context: %v, protocol error: %v", ctx.Err(), p.err)
 	}
 }
+
+func TestStrictProtocolRejectsBeforeQueuing(t *testing.T) {
+	for name, frame := range map[string]string{
+		"malformed": "\x00GORU:{\x00",
+		"unknown":   "\x00GORU:{\"fn\":\"nope\",\"args\":{}}\x00",
+		"pending":   "\x00GORU:{\"id\":\"1\",\"fn\":\"nope\",\"args\":{}}\x00",
+		"flush":     "\x00GORU_FLUSH:-1\x00",
+	} {
+		reader, writer := io.Pipe()
+		p := newProtocolHandler(context.Background(), nil, writer)
+		p.strict = true
+		if _, err := p.Write([]byte(frame)); !errors.Is(err, ErrProtocolViolation) {
+			t.Errorf("%s: %v", name, err)
+		}
+		if len(p.pending) != 0 || len(p.jobs) != 0 {
+			t.Errorf("%s: the call was queued", name)
+		}
+		reader.Close()
+		writer.Close()
+	}
+}
