@@ -18,12 +18,22 @@ type runConfig struct {
 	httpConfig   hostfunc.HTTPConfig
 	kvEnabled    bool
 	kvConfig     hostfunc.KVConfig
+	strict       bool
 }
 
 func defaultRunConfig() runConfig {
 	return runConfig{
 		timeout: 30 * time.Second,
 	}
+}
+
+// WithStrictProtocol makes the host decoder authoritative for guest calls: a
+// malformed call or flush frame, or a call to a function the registry does not
+// hold, ends the run with [ErrProtocolViolation] before the call is queued. The
+// guest cannot recover by catching the error. Without it such a call answers
+// with an ordinary call error and the run continues.
+func WithStrictProtocol() Option {
+	return func(c *runConfig) { c.strict = true }
 }
 
 // WithTimeout sets the maximum execution time.

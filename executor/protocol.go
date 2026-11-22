@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -24,6 +25,10 @@ const (
 
 // ErrProtocolLimit indicates that execution stopped at a guest protocol limit.
 var ErrProtocolLimit = errors.New("protocol-limit: goru protocol limit exceeded")
+
+// ErrProtocolViolation indicates that a run with [WithStrictProtocol] stopped at a
+// malformed call frame or a call to a function the registry does not hold.
+var ErrProtocolViolation = errors.New("protocol-violation: malformed or unknown host call")
 
 type callRequest struct {
 	ID   string         `json:"id,omitempty"`
@@ -79,6 +84,7 @@ type protocolHandler struct {
 	jobs        chan protocolJob
 	workers     sync.Once
 	session     *sessionProtocol
+	strict      bool // malformed and unknown calls end the run (WithStrictProtocol)
 	mu          sync.Mutex
 	writeMu     sync.Mutex
 	err         error
@@ -169,7 +175,17 @@ func (p *protocolHandler) handleFrame(frame string) {
 	if payload, ok := strings.CutPrefix(frame, protocolPrefix); ok {
 		var req callRequest
 		if err := json.Unmarshal([]byte(payload), &req); err != nil {
+			if p.strict {
+				p.fail(fmt.Errorf("%w: malformed call frame", ErrProtocolViolation))
+				return
+			}
 			p.submit(callRequest{}, false)
+			return
+		}
+		if p.strict && !p.known(req.Fn) {
+			// Decided here, before the call is queued or looked up: a guest that
+			// catches the error cannot keep the run going.
+			p.fail(fmt.Errorf("%w: unknown function %s", ErrProtocolViolation, strconv.Quote(req.Fn[:min(len(req.Fn), 64)])))
 			return
 		}
 		if req.ID != "" && len(p.pending) >= maxPendingCalls {
@@ -186,6 +202,9 @@ func (p *protocolHandler) handleFrame(frame string) {
 	if payload, ok := strings.CutPrefix(frame, protocolFlushPrefix); ok {
 		count, err := strconv.Atoi(payload)
 		if err != nil || count <= 0 {
+			if p.strict {
+				p.fail(fmt.Errorf("%w: malformed flush frame", ErrProtocolViolation))
+			}
 			return
 		}
 		for _, req := range p.pending[:min(count, len(p.pending))] {
@@ -205,6 +224,14 @@ func (p *protocolHandler) handleFrame(frame string) {
 	p.realStderr.Write([]byte{0})
 	p.realStderr.Write([]byte(frame))
 	p.realStderr.Write([]byte{0})
+}
+
+func (p *protocolHandler) known(name string) bool {
+	if name == "" || p.registry == nil {
+		return false
+	}
+	_, ok := p.registry.Get(name)
+	return ok
 }
 
 func (p *protocolHandler) submit(req callRequest, valid bool) {
